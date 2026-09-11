@@ -1,0 +1,10 @@
+pandas==2.2.2
+fpdf==1.7.2
+streamlit==1.37.1
+Pillow==10.4.0
+opencv-python==4.11.0.86
+numpy==1.26.4
+scipy==1.13.1
+tensorflow-cpu==2.19.0
+rpyc==5.0.1
+pypylon  # Version not detected; update manually if needed
