@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, List, Sequence, Optional
 from fpdf import FPDF
 import traceback
+from app.settings import config as cfg
 
 # Public default rub levels used in the table
 DEFAULT_RUB_LEVELS: Sequence[int] = (125, 500, 1000, 2000, 5000, 7000)
@@ -112,20 +113,18 @@ def _add_reference_image(
     sample_number: str,
     trial_number: str = "1"):
     
-    ref_dir = os.path.join("data", "reference_pictures", "for_grading")
+    ref_dir = cfg.get_reference_dir(cfg.SUFFIX_GRADING)
     if not os.path.exists(ref_dir):
         return False
-    
-    # First, try the specified trial number
-    ref_filename = f"{sample_number}-0-{trial_number}-ref.png"
+
+    ref_filename = cfg.make_reference_filename(sample_number, "0", trial_number)
     ref_path = os.path.join(ref_dir, ref_filename)
-    
+
     if os.path.exists(ref_path):
         used_trial = trial_number
     else:
-        # Fall back: find any reference image for this sample (stage 0)
         import glob
-        pattern = os.path.join(ref_dir, f"{sample_number}-0-*-ref.png")
+        pattern = os.path.join(ref_dir, cfg.make_reference_filename(sample_number, "0", "*"))
         matches = glob.glob(pattern)
         if not matches:
             return False

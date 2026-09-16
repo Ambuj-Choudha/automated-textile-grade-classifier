@@ -4,6 +4,7 @@ import os
 import cv2
 import datetime
 from app.helpers.utils import ensure_directory
+from app.settings import config as cfg
 
 # Helper function to validate image existence
 def _validate_image_paths(current_path: str, reference_path: str, position: int) -> bool:
@@ -41,12 +42,12 @@ def _process_image_pair(current_path: str, reference_path: str, output_path: str
 # Helper function to construct file paths
 def _construct_paths(script_dir: str, suffix: str, sample_number: str, stage_number: str, trial_number: str, reference_stage: str, position: int) -> tuple:
     """Helper function to construct all necessary file paths for a given position."""
-    input_dir = os.path.join(script_dir, "data", "input_pictures", suffix)
-    diff_dir = os.path.join(script_dir, "data", "difference_pictures", suffix)
-    
-    current_image_path = os.path.join(input_dir, f"{sample_number}-{stage_number}-{trial_number}-{position}.png")
-    reference_image_path = os.path.join(input_dir, f"{sample_number}-{reference_stage}-{trial_number}-{position}.png")
-    diff_filename = f"{sample_number}-{stage_number}-{trial_number}-{position}-dif.png"
+    input_dir = os.path.join(script_dir, cfg.get_input_dir(suffix))
+    diff_dir = os.path.join(script_dir, cfg.get_difference_dir(suffix))
+
+    current_image_path = os.path.join(input_dir, cfg.make_input_filename(sample_number, stage_number, trial_number, position))
+    reference_image_path = os.path.join(input_dir, cfg.make_input_filename(sample_number, reference_stage, trial_number, position))
+    diff_filename = cfg.make_difference_filename(sample_number, stage_number, trial_number, position)
     diff_path = os.path.join(diff_dir, diff_filename)
     
     return current_image_path, reference_image_path, diff_path, diff_dir

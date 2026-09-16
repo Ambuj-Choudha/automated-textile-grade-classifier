@@ -7,6 +7,7 @@ import platform
 from pypylon import pylon
 from pypylon import genicam
 from app.helpers.utils import ensure_directory
+from app.settings import config as cfg
 
 # Captures a single image from the camera using specified User Set configuration
 def get_image_from_cam(camera, target_path, img, save_file=True, file_name="Test-ref.jpg", user_set="UserSet1"):
@@ -42,8 +43,8 @@ def get_image_from_cam(camera, target_path, img, save_file=True, file_name="Test
 # Captures a reference image and 8 rotated images for a sample-stage pair, rotating motor between captures
 def capture_sample_images(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port=18812):
     try:
-        input_dir = os.path.join("data", "input_pictures", suffix)
-        reference_dir = os.path.join("data", "reference_pictures", suffix)
+        input_dir = cfg.get_input_dir(suffix)
+        reference_dir = cfg.get_reference_dir(suffix)
         ensure_directory(input_dir)
         ensure_directory(reference_dir)
 
@@ -57,21 +58,19 @@ def capture_sample_images(sample_number, stage_number, trial_number, suffix, mot
         cam = pylon.InstantCamera(tlf.CreateFirstDevice())
         cam.Open()
 
-        # Capture reference image using User Set 1 (format: {sample}-{stage}-{trial}-ref.png)
-        reference_name = f"{sample_number}-{stage_number}-{trial_number}-ref.png"
+        reference_name = cfg.make_reference_filename(sample_number, stage_number, trial_number)
         get_image_from_cam(cam, reference_dir, img, file_name=reference_name, user_set="UserSet1")
         print(f"Captured reference image with User Set 1: {reference_name}")
         cam.Close()
 
         print(f"Connecting to motor at {motor_ip}:{motor_port}")
 
-        # Capture 8 images at 45° increments using User Set 2 (format: {sample}-{stage}-{trial}-{position}.png)
         for i in range(1, 9):
             try:
                 cam = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
                 cam.Open()
 
-                picture_name = f"{sample_number}-{stage_number}-{trial_number}-{i}.png"
+                picture_name = cfg.make_input_filename(sample_number, stage_number, trial_number, i)
                 get_image_from_cam(cam, input_dir, img, save_file=True, file_name=picture_name, user_set="UserSet2")
                 print(f"Captured image with User Set 2: {picture_name}")
             except genicam.GenericException as e:

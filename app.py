@@ -235,10 +235,10 @@ def capture_grading_callback(sample_number, stage_number, trial_number, suffix, 
     """Callback for capture button in grading mode"""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        ref_dir = os.path.join(script_dir, "data", "reference_pictures", suffix)
+        ref_dir = os.path.join(script_dir, cfg.get_reference_dir(suffix))
         
         # Check for this trial's reference image (captured at stage 0)
-        ref_filename = f"{sample_number}-0-{trial_number}-ref.png"
+        ref_filename = cfg.make_reference_filename(sample_number, "0", trial_number)
         ref_filepath = os.path.join(ref_dir, ref_filename)
 
         if stage_number != "0" and not os.path.exists(ref_filepath):
@@ -293,10 +293,10 @@ def capture_training_callback(sample_number, stage_number, trial_number, suffix,
     """Callback for capture button in training mode"""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        ref_dir = os.path.join(script_dir, "data", "reference_pictures", suffix)
+        ref_dir = os.path.join(script_dir, cfg.get_reference_dir(suffix))
         
         # Check for this trial's reference image (captured at stage 0)
-        ref_filename = f"{sample_number}-0-{trial_number}-ref.png"
+        ref_filename = cfg.make_reference_filename(sample_number, "0", trial_number)
         ref_filepath = os.path.join(ref_dir, ref_filename)
 
         if stage_number != "0" and not os.path.exists(ref_filepath):
@@ -879,7 +879,7 @@ def display_operation_status(sample_number, stage_number, trial_number, suffix):
     # Display 8 input images in 2 rows (4 per row)
     st.markdown(f"#### {t('view_images')}")
     input_images = image_status['present_input_images']
-    input_dir = os.path.join("data", "input_pictures", suffix)
+    input_dir = cfg.get_input_dir(suffix)
     for i in range(0, len(input_images), 4):
         cols = st.columns(4)
         for j in range(4):
@@ -892,7 +892,7 @@ def display_operation_status(sample_number, stage_number, trial_number, suffix):
 
     # Display the reference image (if present)
     ref_images = image_status.get('reference_image', [])
-    ref_dir = os.path.join("data", "reference_pictures", suffix)
+    ref_dir = cfg.get_reference_dir(suffix)
     if ref_images:
         ref_path = os.path.join(ref_dir, ref_images[0])
         if os.path.exists(ref_path):

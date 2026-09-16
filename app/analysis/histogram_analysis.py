@@ -21,7 +21,6 @@ except Exception:
 
 FEATURE_HEADERS: Tuple[str, str, str, str, str] = ("Image", "Mean", "Std", "Max", "Mode")
 TRAIN_HEADERS: Tuple[str, str, str, str, str, str] = (*FEATURE_HEADERS, "Grade")
-DIFF_BASE_DIR = os.path.join("data", "difference_pictures")
 
 # Track last-used backend for diagnostics
 LAST_BACKEND_USED: str = "itanet_dll"
@@ -109,7 +108,7 @@ def _process_difference_images(diff_dir: str, sample_number: str, stage_number: 
     """
     rows: List[List[Union[str, float]]] = []
     for i in range(1, 9):
-        diff_filename = f"{sample_number}-{stage_number}-{trial_number}-{i}-dif.png"
+        diff_filename = cfg.make_difference_filename(sample_number, stage_number, trial_number, i)
         diff_path = os.path.join(diff_dir, diff_filename)
 
         stats_result = _calculate_image_stats(diff_path)
@@ -140,8 +139,7 @@ def _write_csv_with_headers(file_path: str, headers: Sequence[str], data: List[S
 
 
 def _get_diff_dir(suffix: str) -> str:
-    """Resolve difference directory from suffix."""
-    return os.path.join(DIFF_BASE_DIR, suffix)
+    return cfg.get_difference_dir(suffix)
 
 
 def _safe_unlink(path: Optional[str]) -> None:
@@ -182,7 +180,7 @@ def _run_backend_batch(csv_path: str, output_path: Optional[str], custom_net_fil
 
 # -------- Public functions --------
 
-def analyze_difference_images_and_predict_output(sample_number: str, stage_number: str, trial_number: str, output_dir: str = os.path.join("output", "grading_results")) -> Optional[float]:
+def analyze_difference_images_and_predict_output(sample_number: str, stage_number: str, trial_number: str, output_dir: str = cfg.GRADING_RESULTS_DIR) -> Optional[float]:
     """
     Analyze per-image stats, write analysis CSV, then perform prediction by:
       - Creating a temporary single-row CSV with averaged features
@@ -277,7 +275,7 @@ def analyze_difference_images_and_predict_output(sample_number: str, stage_numbe
         return None
 
 
-def analyze_difference_images(sample_number: str, stage_number: str, trial_number: str, grade_number: Union[str, float], output_dir: str = os.path.join("data", "training_features")) -> Optional[None]:
+def analyze_difference_images(sample_number: str, stage_number: str, trial_number: str, grade_number: Union[str, float], output_dir: str = cfg.TRAINING_FEATURES_DIR) -> Optional[None]:
     """
     Build CSV rows of (Mean, Std, Max, Mode, Grade) feature vectors for ITA-Net training:
       - per_image_features.csv: one row per difference image (8 per sample)

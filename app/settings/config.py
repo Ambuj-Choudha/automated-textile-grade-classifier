@@ -49,6 +49,38 @@ REFERENCE_PICTURES_DIR = os.path.join(DATA_DIR, "reference_pictures")
 DIFFERENCE_PICTURES_DIR = os.path.join(DATA_DIR, "difference_pictures")
 TRAINING_FEATURES_DIR = os.path.join(DATA_DIR, "training_features")
 
+# Mode suffixes — the only two valid subdirectory names under each picture dir
+SUFFIX_GRADING = "for_grading"
+SUFFIX_TRAINING = "for_training"
+
+
+# --- Directory path builders ---
+
+def get_input_dir(mode: str) -> str:
+    return os.path.join(INPUT_PICTURES_DIR, mode)
+
+
+def get_reference_dir(mode: str) -> str:
+    return os.path.join(REFERENCE_PICTURES_DIR, mode)
+
+
+def get_difference_dir(mode: str) -> str:
+    return os.path.join(DIFFERENCE_PICTURES_DIR, mode)
+
+
+# --- File name builders ---
+
+def make_input_filename(sample: str, stage: str, trial: str, position: int) -> str:
+    return f"{sample}-{stage}-{trial}-{position}.png"
+
+
+def make_reference_filename(sample: str, stage: str, trial: str) -> str:
+    return f"{sample}-{stage}-{trial}-ref.png"
+
+
+def make_difference_filename(sample: str, stage: str, trial: str, position: int) -> str:
+    return f"{sample}-{stage}-{trial}-{position}-dif.png"
+
 # Generated outputs
 OUTPUT_DIR = "output"
 GRADING_RESULTS_DIR = os.path.join(OUTPUT_DIR, "grading_results")

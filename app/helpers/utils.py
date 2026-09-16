@@ -5,6 +5,7 @@ import pandas as pd
 from fpdf import FPDF
 import streamlit as st
 from app.reporting.pdf_report import generate_pilling_report
+from app.settings import config as cfg
 import re
 
 # Ensures that the specified directory exists; creates it if it doesn't.
@@ -40,7 +41,7 @@ def validate_grade(input_number: str) -> bool:
 
 # Returns a sorted list of unique sample numbers found in the input directory.
 def get_available_samples(suffix: str) -> List[str]:
-    input_directory = os.path.join("data", "input_pictures", suffix)
+    input_directory = cfg.get_input_dir(suffix)
     try:
         if not os.path.exists(input_directory):
             return []
@@ -85,21 +86,19 @@ def check_required_images(sample_number: str, stage_number: str, trial_number: s
     try:
         # Check for 8 input (rotational) images with trial number
         for i in range(1, 9):
-            image_name = f"{sample_number}-{stage_number}-{trial_number}-{i}.png"
-            image_path = os.path.join("data", "input_pictures", suffix, image_name)
+            image_name = cfg.make_input_filename(sample_number, stage_number, trial_number, i)
+            image_path = os.path.join(cfg.get_input_dir(suffix), image_name)
             if not _check_image_exists(image_path, image_name, status['present_input_images']):
                 status['all_input_present'] = False
 
-        # Check for 8 difference images with trial number
         for i in range(1, 9):
-            image_name = f"{sample_number}-{stage_number}-{trial_number}-{i}-dif.png"
-            image_path = os.path.join("data", "difference_pictures", suffix, image_name)
+            image_name = cfg.make_difference_filename(sample_number, stage_number, trial_number, i)
+            image_path = os.path.join(cfg.get_difference_dir(suffix), image_name)
             if not _check_image_exists(image_path, image_name, status['present_difference_images']):
                 status['all_difference_present'] = False
-        
-        # Reference image format: {sample}-{stage}-{trial}-ref.png (each trial has its own reference)
-        ref_name = f"{sample_number}-{stage_number}-{trial_number}-ref.png"
-        ref_path = os.path.join("data", "reference_pictures", suffix, ref_name)
+
+        ref_name = cfg.make_reference_filename(sample_number, stage_number, trial_number)
+        ref_path = os.path.join(cfg.get_reference_dir(suffix), ref_name)
         if not _check_image_exists(ref_path, ref_name, status['reference_image']):
             status['reference_present'] = False
         
