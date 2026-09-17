@@ -234,16 +234,12 @@ def restart_app_callback():
 def capture_grading_callback(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port):
     """Callback for capture button in grading mode"""
     try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        ref_dir = os.path.join(script_dir, cfg.get_reference_dir(suffix))
-        
-        # Check for this trial's reference image (captured at stage 0)
-        ref_filename = cfg.make_reference_filename(sample_number, "0", trial_number)
-        ref_filepath = os.path.join(ref_dir, ref_filename)
-
-        if stage_number != "0" and not os.path.exists(ref_filepath):
-            st.session_state.capture_error = f"Reference image not found: {ref_filename}. Please capture stage 0 for trial {trial_number} first."
-            return
+        if stage_number != "0":
+            stage0_path = os.path.join(cfg.get_input_dir(suffix),
+                                       cfg.make_input_filename(sample_number, "0", trial_number, 1))
+            if not os.path.exists(stage0_path):
+                st.session_state.capture_error = f"Stage 0 images not found for trial {trial_number}. Please capture stage 0 first."
+                return
 
         # Clear any previous error messages at the start
         st.session_state.capture_error = None
@@ -275,10 +271,10 @@ def capture_grading_callback(sample_number, stage_number, trial_number, suffix, 
                 st.session_state.diff_error = t("diff_create_fail")
                 return
 
-            grade = analyze_histograms_action(sample_number, stage_number, trial_number, 0)
-            if grade is not None:
-                st.session_state['Grade'] = grade
-                st.session_state.histogram_success = f"{t('histogram_success')} {grade:.2f}"
+            grades = analyze_histograms_action(sample_number, stage_number, trial_number, 0)
+            if grades is not None:
+                st.session_state['Grade'] = grades
+                st.session_state.histogram_success = t("histogram_success")
             else:
                 st.session_state.histogram_error = t("histogram_fail")
 
@@ -289,27 +285,20 @@ def capture_grading_callback(sample_number, stage_number, trial_number, suffix, 
         # Always clear in-progress flag (covers early returns and exceptions)
         st.session_state.capture_in_progress = False
 
-def capture_training_callback(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port, grade_number):
+def capture_training_callback(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port,
+                              grade_number, matting_grade_number, fuzzing_grade_number):
     """Callback for capture button in training mode"""
     try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        ref_dir = os.path.join(script_dir, cfg.get_reference_dir(suffix))
-        
-        # Check for this trial's reference image (captured at stage 0)
-        ref_filename = cfg.make_reference_filename(sample_number, "0", trial_number)
-        ref_filepath = os.path.join(ref_dir, ref_filename)
+        if stage_number != "0":
+            stage0_path = os.path.join(cfg.get_input_dir(suffix),
+                                       cfg.make_input_filename(sample_number, "0", trial_number, 1))
+            if not os.path.exists(stage0_path):
+                st.session_state.capture_error_training = f"Stage 0 images not found for trial {trial_number}. Please capture stage 0 first."
+                return
 
-        if stage_number != "0" and not os.path.exists(ref_filepath):
-            st.session_state.capture_error_training = f"Reference image not found: {ref_filename}. Please capture stage 0 for trial {trial_number} first."
-            return
-
-        # Clear any previous errors
         st.session_state.capture_error_training = None
-
-        # Mark in progress (UI disables button before this via pending flag)
         st.session_state.capture_in_progress_training = True
 
-        # Perform capture (spinner shown in UI)
         capture_success = capture_images_action(sample_number, stage_number, trial_number, "for_training", motor_ip, motor_port)
 
         if not capture_success:
@@ -330,14 +319,14 @@ def capture_training_callback(sample_number, stage_number, trial_number, suffix,
                     return
 
             with st.spinner(t("histogram_spinner")):
-                analyze_histograms_action(sample_number, stage_number, trial_number, grade_number)
+                analyze_histograms_action(sample_number, stage_number, trial_number,
+                                          grade_number, matting_grade_number, fuzzing_grade_number)
                 st.session_state.histogram_success_training = t("histogram_success")
 
     except Exception as e:
         st.session_state.capture_error_training = f"Unexpected error: {str(e)}"
         print(f"Error in capture_training_callback: {e}")
     finally:
-        # Always clear in-progress flag
         st.session_state.capture_in_progress_training = False
 
 def export_results_callback(sample_number, stage_number, load_weight, trial_number="1"):
@@ -357,12 +346,14 @@ def export_results_callback(sample_number, stage_number, load_weight, trial_numb
 
     try:
         # Check if analysis was completed first
-        if 'Grade' not in st.session_state or st.session_state['Grade'] is None:
+        grades = st.session_state.get('Grade')
+        if not grades:
             st.session_state.export_error = "Cannot export: No analysis results available. Please complete the grading process first."
             return
-        
-        # Attempt the export with trial_number
-        success = export_results(sample_number, stage_number, load_weight, operator, trial_number=trial_number)
+
+        # Attempt the export with trial_number and all three grades
+        success = export_results(sample_number, stage_number, load_weight, operator,
+                                 trial_number=trial_number, grades=grades)
         
         if success:
             st.session_state.export_success = f"PDF report saved to reports/{sample_number}-{clean_operator_name}-report.pdf!"
@@ -524,8 +515,8 @@ def setup_sidebar():
 # Function: Image Viewer Expander
 def show_image_viewer():
     valid_folders = [
-        'data/input_pictures/for_training', 'data/difference_pictures/for_training', 'data/reference_pictures/for_training',
-        'data/input_pictures/for_grading', 'data/difference_pictures/for_grading', 'data/reference_pictures/for_grading'
+        'data/input_pictures/for_training', 'data/difference_pictures/for_training',
+        'data/input_pictures/for_grading', 'data/difference_pictures/for_grading',
     ]
 
     with st.expander(t("view_images")):
@@ -740,23 +731,29 @@ def show_training_mode():
         default_stage = st.session_state.get("last_stage_number_t", "0")
         default_trial = st.session_state.get("last_trial_number_t", "1")
         default_grade = st.session_state.get("last_grade_number_t", "1")
+        default_matting = st.session_state.get("last_matting_grade_number_t", "1")
+        default_fuzzing = st.session_state.get("last_fuzzing_grade_number_t", "1")
 
-        # Create inputs with persistent defaults
         sample_number = st.text_input(t("sample_number"), value=default_sample, key="k_sample_number_t", help="e.g., 00001, 00002, etc.")
         stage_number = st.text_input(t("stage_number"), value=default_stage, key="k_stage_number_t", help="e.g., 125, 500, 1000, etc.")
         trial_number = st.text_input(t("trial_number"), value=default_trial, key="k_trial_number_t", help="e.g., 1, 2, 3, etc.")
         grade_number = st.text_input(t("grade_number"), value=default_grade, key="k_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
+        matting_grade_number = st.text_input(t("matting_grade_number"), value=default_matting, key="k_matting_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
+        fuzzing_grade_number = st.text_input(t("fuzzing_grade_number"), value=default_fuzzing, key="k_fuzzing_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
 
-        # Save current values back to session state
         st.session_state.last_sample_number_t = sample_number
         st.session_state.last_stage_number_t = stage_number
         st.session_state.last_trial_number_t = trial_number
         st.session_state.last_grade_number_t = grade_number
+        st.session_state.last_matting_grade_number_t = matting_grade_number
+        st.session_state.last_fuzzing_grade_number_t = fuzzing_grade_number
 
         sample_valid = validate_input_number(sample_number)
         stage_valid = validate_input_number(stage_number)
         trial_valid = validate_input_number(trial_number)
         grade_valid = validate_grade(grade_number)
+        matting_grade_valid = validate_grade(matting_grade_number)
+        fuzzing_grade_valid = validate_grade(fuzzing_grade_number)
 
         if not sample_valid:
             st.error(t("invalid_sample"))
@@ -766,7 +763,13 @@ def show_training_mode():
             st.error(t("invalid_trial"))
         if not grade_valid:
             st.error(t("invalid_grade"))
-        if sample_valid and stage_valid and trial_valid and grade_valid:
+        if not matting_grade_valid:
+            st.error(t("invalid_matting_grade"))
+        if not fuzzing_grade_valid:
+            st.error(t("invalid_fuzzing_grade"))
+
+        all_valid = sample_valid and stage_valid and trial_valid and grade_valid and matting_grade_valid and fuzzing_grade_valid
+        if all_valid:
             st.success(t("valid_input"))
             image_status = cached_check_required_images(sample_number, stage_number, trial_number, "for_training", st.session_state.fs_epoch)
             if image_status['all_input_present']:
@@ -774,7 +777,6 @@ def show_training_mode():
 
         st.markdown("---")
 
-        # Capture button with inline spinner placed near messages
         capture_spinner_placeholder_t = st.empty()
         clicked_t = st.button(
             t("capture_button_training"),
@@ -791,6 +793,8 @@ def show_training_mode():
                 "motor_ip": motor_ip,
                 "motor_port": motor_port,
                 "grade_number": grade_number,
+                "matting_grade_number": matting_grade_number,
+                "fuzzing_grade_number": fuzzing_grade_number,
             }
             st.rerun()
 
@@ -799,7 +803,9 @@ def show_training_mode():
                 with st.spinner(t("image_capture_spinner")):
                     p = st.session_state.pending_capture_training
                     capture_training_callback(
-                        p["sample_number"], p["stage_number"], p["trial_number"], p["suffix"], p["motor_ip"], p["motor_port"], p["grade_number"]
+                        p["sample_number"], p["stage_number"], p["trial_number"], p["suffix"],
+                        p["motor_ip"], p["motor_port"],
+                        p["grade_number"], p["matting_grade_number"], p["fuzzing_grade_number"]
                     )
             st.session_state.pending_capture_training = None
             st.rerun()
@@ -840,19 +846,21 @@ def create_difference_action(sample_number, stage_number, trial_number, suffix, 
         return False 
 
 
-def analyze_histograms_action(sample_number, stage_number, trial_number, grade_number):
+def analyze_histograms_action(sample_number, stage_number, trial_number,
+                              grade_number, matting_grade_number=None, fuzzing_grade_number=None):
     try:
         print(f"Analyzing histograms for sample {sample_number}, stage {stage_number}, trial {trial_number}")
         if grade_number == 0:
-            grade = analyze_difference_images_and_predict_output(sample_number, stage_number, trial_number)
-            if grade:
-                print("Histogram analysis completed successfully")
-                return grade
+            grades = analyze_difference_images_and_predict_output(sample_number, stage_number, trial_number)
+            if grades:
+                print(f"Histogram analysis completed successfully: {grades}")
+                return grades
             else:
                 print("Histogram analysis failed or no data found")
                 return None
         else:
-            analyze_difference_images(sample_number, stage_number, trial_number, grade_number)
+            analyze_difference_images(sample_number, stage_number, trial_number,
+                                      grade_number, matting_grade_number, fuzzing_grade_number)
 
     except Exception as e:
         print(f"Error in analyze_histograms_action: {e}")
@@ -890,23 +898,20 @@ def display_operation_status(sample_number, stage_number, trial_number, suffix):
                     with cols[j]:
                         st.image(load_image_bytes(image_path, sig), caption=input_images[i + j], use_column_width=True)
 
-    # Display the reference image (if present)
-    ref_images = image_status.get('reference_image', [])
-    ref_dir = cfg.get_reference_dir(suffix)
-    if ref_images:
-        ref_path = os.path.join(ref_dir, ref_images[0])
-        if os.path.exists(ref_path):
-            st.image(load_image_bytes(ref_path, _file_sig(ref_path)), caption=ref_images[0], use_column_width=False, width=250)
 
-def display_grades(grade, sample_number, stage_number):
-    if grade is None:
-        st.warning(t("histogram_fail").replace("❌ Histogram analysis failed!", "No analysis results to display"))
+def display_grades(grades, sample_number, stage_number):
+    if not grades:
+        st.warning("No analysis results to display")
         return
 
-    st.metric(
-        f"{t('sample_number')} {sample_number}, {t('stage_number')} {stage_number} {t('results')}:",
-        f"{grade}"
-    )
+    st.markdown(f"**{t('sample_number')} {sample_number} — {t('stage_number')} {stage_number}**")
+    col_p, col_m, col_f = st.columns(3)
+    with col_p:
+        st.metric(t("pilling_grade_result"), grades.get("pilling", "—"))
+    with col_m:
+        st.metric(t("matting_grade_result"), grades.get("matting", "—"))
+    with col_f:
+        st.metric(t("fuzzing_grade_result"), grades.get("fuzzing", "—"))
 
 ADMIN_PASSWORD = "1234"  # Change this to your actual secure password
 

@@ -205,7 +205,6 @@ def _install_dummy_utils(monkeypatch):
             "present_difference_images": [],
             "all_input_present": False,
             "all_difference_present": False,
-            "reference_image": [],
         }
 
     def ensure_directory(path: str):
@@ -248,8 +247,7 @@ def _install_dummy_camera_and_diff(monkeypatch):
 def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg = types.ModuleType("config")
     cfg.BASE_DIR = str(tmp_path)
-    cfg.ITANET_DATA_DIR = str(tmp_path / "itanet_data")
-    cfg.DLL_PATH = str(tmp_path / "itanet_data" / "itanet.dll")
+    cfg.DLL_PATH = str(tmp_path / "itanet" / "itanet.dll")
     cfg.BACKEND = "itanet_dll"
     cfg.TF_MODEL_PATH = str(tmp_path / "my_model.h5")
     cfg.FEATURE_COLUMNS = ("Mean", "Std", "Max", "Mode")
@@ -258,7 +256,12 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg.CLIP_RANGE = (1.0, 5.0)
     cfg.CUSTOM_NET = None
     cfg.CUSTOM_TRN = None
-    os.makedirs(cfg.ITANET_DATA_DIR, exist_ok=True)
+    cfg.get_itanet_run_dir = lambda grade: str(tmp_path / "itanet" / grade / "run")
+    cfg.get_itanet_fls_dir = lambda grade: str(tmp_path / "itanet" / grade / "data")
+    cfg.get_itanet_archive_dir = lambda grade: str(tmp_path / "itanet" / "archive" / grade)
+    for grade in ("pilling", "matting", "fuzzing"):
+        os.makedirs(cfg.get_itanet_run_dir(grade), exist_ok=True)
+        os.makedirs(cfg.get_itanet_fls_dir(grade), exist_ok=True)
     _install_at(monkeypatch, "app.settings.config", cfg)
     return cfg
 
@@ -604,13 +607,12 @@ def test_capture_grading_callback_success(prepared_env):
         # Mock __file__ to point to tmp directory
         monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
         
-        # Create reference image
-        ref_dir = prepared_env["tmp"] / "reference_pictures" / "for_grading"
-        ref_dir.mkdir(parents=True, exist_ok=True)
-        ref_file = ref_dir / "00001-0-1-ref.png"
-        ref_file.touch()
-        
-        # Capture stage 1 with reference present
+        # Create stage-0 input image (required before capturing any stage > 0)
+        stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_grading"
+        stage0_dir.mkdir(parents=True, exist_ok=True)
+        (stage0_dir / "00001-0-1-1.png").touch()
+
+        # Capture stage 1 with stage-0 baseline present
         app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
         
         # Should succeed
@@ -627,13 +629,12 @@ def test_capture_grading_callback_success(prepared_env):
         # Mock __file__ to point to tmp directory
         monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
         
-        # Create reference image
-        ref_dir = prepared_env["tmp"] / "reference_pictures" / "for_training"
-        ref_dir.mkdir(parents=True, exist_ok=True)
-        ref_file = ref_dir / "00001-0-1-ref.png"
-        ref_file.touch()
-        
-        # Capture stage 1 with reference present
+        # Create stage-0 input image (required before capturing any stage > 0)
+        stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_training"
+        stage0_dir.mkdir(parents=True, exist_ok=True)
+        (stage0_dir / "00001-0-1-1.png").touch()
+
+        # Capture stage 1 with stage-0 baseline present
         app.capture_training_callback("00001", "1", "1", "for_training", "127.0.0.1", 18812, 2.5)
         
         # Should succeed
@@ -782,11 +783,10 @@ def test_capture_training_callback_success(prepared_env, monkeypatch):
     # Mock __file__ to point to tmp directory so app uses correct base path
     monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
     
-    # Create reference image directory structure
-    ref_dir = prepared_env["tmp"] / "reference_pictures" / "for_training"
-    ref_dir.mkdir(parents=True, exist_ok=True)
-    ref_file = ref_dir / "00001-0-1-ref.png"
-    ref_file.touch()
+    # Create stage-0 input image (required before capturing any stage > 0)
+    stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_training"
+    stage0_dir.mkdir(parents=True, exist_ok=True)
+    (stage0_dir / "00001-0-1-1.png").touch()
     
     app.capture_training_callback("00001", "1", "1", "for_training", "127.0.0.1", 18812, 2.5)
     

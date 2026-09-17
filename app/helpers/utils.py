@@ -79,12 +79,9 @@ def check_required_images(sample_number: str, stage_number: str, trial_number: s
         'all_difference_present': True,
         'present_input_images': [],
         'present_difference_images': [],
-        'reference_present': True,
-        'reference_image': []
     }
-    
+
     try:
-        # Check for 8 input (rotational) images with trial number
         for i in range(1, 9):
             image_name = cfg.make_input_filename(sample_number, stage_number, trial_number, i)
             image_path = os.path.join(cfg.get_input_dir(suffix), image_name)
@@ -97,11 +94,6 @@ def check_required_images(sample_number: str, stage_number: str, trial_number: s
             if not _check_image_exists(image_path, image_name, status['present_difference_images']):
                 status['all_difference_present'] = False
 
-        ref_name = cfg.make_reference_filename(sample_number, stage_number, trial_number)
-        ref_path = os.path.join(cfg.get_reference_dir(suffix), ref_name)
-        if not _check_image_exists(ref_path, ref_name, status['reference_image']):
-            status['reference_present'] = False
-        
         return status
 
     except Exception as e:
@@ -111,8 +103,6 @@ def check_required_images(sample_number: str, stage_number: str, trial_number: s
             'all_difference_present': False,
             'present_input_images': [],
             'present_difference_images': [],
-            'reference_present': False,
-            'reference_image': []
         }
 
 class CustomPDF(FPDF):
@@ -232,7 +222,7 @@ def _scan_stage_results_for_sample(sample_number: str) -> dict[int, list[str]]:
         print(f"Error scanning stage results for sample {sample_number}: {e}")
         return {}
 
-def export_results(sample_number: str, stage_number: str, load_weight: str | float | int, operator_name: str, trial_number: str = "1") -> bool:
+def export_results(sample_number: str, stage_number: str, load_weight: str | float | int, operator_name: str, trial_number: str = "1", grades: dict = None) -> bool:
     """
     Export results to a single combined PDF per sample.
     - Dynamically builds table rows from all available stages for the sample.
@@ -272,13 +262,27 @@ def export_results(sample_number: str, stage_number: str, load_weight: str | flo
         pdf_filename = f"{sample_number}-{clean_operator_name}-report.pdf"
         pdf_filepath = os.path.join(reports_dir, pdf_filename)
 
-        # Generate PDF (dynamic rub levels from scanned files)
+        # Build per-grade rub tables from grades dict if provided
+        matting_by_rubs = None
+        fuzzing_by_rubs = None
+        if grades:
+            matting_val = grades.get("matting")
+            fuzzing_val = grades.get("fuzzing")
+            if matting_val is not None:
+                matting_by_rubs = {rub: [str(matting_val), "NA", "NA", str(matting_val)]
+                                   for rub in results_by_rubs}
+            if fuzzing_val is not None:
+                fuzzing_by_rubs = {rub: [str(fuzzing_val), "NA", "NA", str(fuzzing_val)]
+                                   for rub in results_by_rubs}
+
         ok = generate_pilling_report(
             sample_number=sample_number,
             stage_number=stage_number,
             load_weight_g=load_weight,
             operator_name=operator_name,
             results_by_rubs=results_by_rubs,
+            matting_by_rubs=matting_by_rubs,
+            fuzzing_by_rubs=fuzzing_by_rubs,
             abradant="Similar Fabric",
             output_path=pdf_filepath,
             rub_levels=list(results_by_rubs.keys()),
