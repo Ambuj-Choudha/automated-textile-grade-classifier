@@ -8,8 +8,8 @@ Operations:
        trained weights, ready for the next recall.
 
 Usage:
-    python itanet_training.py data/training_features/per_image_features.csv
-    python itanet_training.py data/training_features/averaged_features.csv --net-type 2
+    python itanet_training.py data/training_features/pilling_averaged_features.csv --grade pilling
+    python itanet_training.py data/training_features/matting_averaged_features.csv --grade matting --net-type 2
 
 Full workflow reference (DLL contract, byte formats, archive rationale, layout
 constraints): docs/itanet/WORKFLOW.md.
@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -46,6 +47,57 @@ from itanet_recall import (
 # file rather than a trained weights-bearing one. Mirrors the check in
 # ITA-net-repo/experiment/recall/recall.py.
 PRISTINE_NET_MAX_BYTES = 500
+
+
+@dataclass(frozen=True)
+class GradePaths:
+    """All disk paths one training run touches, resolved once from cfg."""
+    run_dir: Path
+    fls_dir: Path
+    archive_dir: Path
+    dll_path: str
+    net: Path           # Neuronalesnetz.NET
+    trn: Path           # Neuronalesnetz.TRN
+    data_out: Path      # TrainingData.dat
+    grades_out: Path    # TrainingGrades.dat
+    training_fls: Path  # training.fls filelist
+
+
+def _paths_for(grade: str) -> GradePaths:
+    from app.settings import config as cfg
+    run_dir = Path(cfg.get_itanet_run_dir(grade))
+    fls_dir = Path(cfg.get_itanet_fls_dir(grade))
+    return GradePaths(
+        run_dir=run_dir,
+        fls_dir=fls_dir,
+        archive_dir=Path(cfg.get_itanet_archive_dir(grade)),
+        dll_path=cfg.DLL_PATH,
+        net=run_dir / ITANetFiles.NET,
+        trn=run_dir / ITANetFiles.TRN,
+        data_out=run_dir / ITANetFiles.TRAIN_INPUT,
+        grades_out=run_dir / ITANetFiles.TRAIN_TARGET,
+        training_fls=fls_dir / ITANetFiles.TRAINING_FLS,
+    )
+
+
+def _check_prerequisites(paths: GradePaths, csv_path: Path, net_type: int) -> None:
+    """Raise if inputs aren't in a state where training can begin."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
+    if not paths.net.exists():
+        raise FileNotFoundError(f"Missing network structure file: {paths.net}")
+    if not paths.trn.exists():
+        raise FileNotFoundError(f"Missing training schedule file: {paths.trn}")
+    _guard_net_matches_net_type(paths.net, net_type)
+
+
+def _write_training_filelist(paths: GradePaths) -> None:
+    paths.fls_dir.mkdir(parents=True, exist_ok=True)
+    ITANetFileWriter.write_filelist(
+        str(paths.training_fls),
+        [ITANetFiles.TRAIN_INPUT, ITANetFiles.TRAIN_TARGET,
+         ITANetFiles.NET, ITANetFiles.TRN],
+    )
 
 
 def _parse_cell(raw: str) -> float:
@@ -207,68 +259,38 @@ def train_from_csv(
     When ``backup`` is True (default), the existing .NET + .TRN are
     snapshotted to ``models/itanet/archive/<grade>/<UTC>/`` first.
     """
-    from app.settings import config as cfg
-    run_dir_p = Path(cfg.get_itanet_run_dir(grade))
-    fls_dir_p = Path(cfg.get_itanet_fls_dir(grade))
-    dll_path_s = cfg.DLL_PATH
-    archive_dir_p = Path(cfg.get_itanet_archive_dir(grade))
+    paths = _paths_for(grade)
     csv_path_p = Path(csv_path).resolve()
+    _check_prerequisites(paths, csv_path_p, net_type)
 
-    if not csv_path_p.exists():
-        raise FileNotFoundError(f"CSV not found: {csv_path_p}")
+    n, k = csv_to_training_dats(csv_path_p, paths.data_out, paths.grades_out, decimal=decimal)
+    print(f"[train] converted {csv_path_p.name}: {n} samples x {k} features -> "
+          f"{paths.data_out.name}, {paths.grades_out.name}")
 
-    net_path = run_dir_p / ITANetFiles.NET
-    trn_path = run_dir_p / ITANetFiles.TRN
-    if not net_path.exists():
-        raise FileNotFoundError(f"Missing network structure file: {net_path}")
-    if not trn_path.exists():
-        raise FileNotFoundError(f"Missing training schedule file: {trn_path}")
-
-    _guard_net_matches_net_type(net_path, net_type)
-
-    data_out = run_dir_p / ITANetFiles.TRAIN_INPUT
-    grades_out = run_dir_p / ITANetFiles.TRAIN_TARGET
-    n, k = csv_to_training_dats(csv_path_p, data_out, grades_out, decimal=decimal)
-    print(
-        f"[train] converted {csv_path_p.name}: {n} samples x {k} features -> "
-        f"{data_out.name}, {grades_out.name}"
-    )
-
-    fls_dir_p.mkdir(parents=True, exist_ok=True)
-    training_fls = fls_dir_p / ITANetFiles.TRAINING_FLS
-    ITANetFileWriter.write_filelist(
-        str(training_fls),
-        [
-            ITANetFiles.TRAIN_INPUT,
-            ITANetFiles.TRAIN_TARGET,
-            ITANetFiles.NET,
-            ITANetFiles.TRN,
-        ],
-    )
+    _write_training_filelist(paths)
 
     if backup:
-        archived = _archive_existing_net(run_dir_p, archive_dir_p)
+        archived = _archive_existing_net(paths.run_dir, paths.archive_dir)
         if archived is not None:
             print(f"[train] archived previous .NET + .TRN to {archived}")
         else:
             print("[train] no existing .NET to archive")
 
-    lib = load_itanet_dll(dll_path_s)
+    lib = load_itanet_dll(paths.dll_path)
     komma_punkt = decimal_to_komma_punkt(decimal)
 
     print(f"[train] running run_training_session(net_type={net_type}, "
           f"komma_punkt={komma_punkt}, shuffle={shuffle}) ...")
-    with change_directory(str(run_dir_p)):
+    with change_directory(str(paths.run_dir)):
         rc = int(lib.run_training_session(net_type, komma_punkt, shuffle))
 
     if rc != 0:
         raise RuntimeError(f"ITANet training failed with code: {rc}")
+    if not paths.net.exists():
+        raise RuntimeError(f"Training returned 0 but {paths.net} was not written")
 
-    if not net_path.exists():
-        raise RuntimeError(f"Training returned 0 but {net_path} was not written")
-
-    print(f"[train] wrote {net_path}")
-    return net_path
+    print(f"[train] wrote {paths.net}")
+    return paths.net
 
 
 def main() -> None:
