@@ -8,12 +8,10 @@ Two entry points share the same _TRIAL_SCENARIOS fixture data:
 The visual path is for eyeballing layout, table shape, and reference-image
 embedding. PDFs land in reports/visual_tests/ (gitignored).
 """
+import csv
 import os
 import sys
-import tempfile
-import shutil
 import time
-import importlib
 from pathlib import Path
 
 # pytest is a dev-only dependency. The visual-check __main__ block doesn't need
@@ -28,218 +26,212 @@ else:
         class _NoopDecorator:
             def __getattr__(self, _name):
                 def deco(*args, **kwargs):
-                    # bare @decorator: args=(func,), kwargs={}
                     if args and callable(args[0]) and not kwargs:
                         return args[0]
-                    # @decorator(...) form: returns identity decorator
                     return lambda f: f
                 return deco
-        pytest = _NoopDecorator()        # pytest.fixture, pytest.fixture(...)
-        pytest.mark = _NoopDecorator()    # type: ignore[attr-defined]
+        pytest = _NoopDecorator()
+        pytest.mark = _NoopDecorator()  # type: ignore[attr-defined]
 
 # Add project root to sys.path so `app.*` imports resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Only import pdf_report here (does not touch Streamlit)
 from app.reporting.pdf_report import generate_pilling_report
+from app.reporting.results import (
+    _build_by_rubs,
+    _scan_stage_results_for_sample,
+    export_results,
+)
+
 
 # --- helpers -----------------------------------------------------------------
 
 def _read_pdf_text(path: str) -> str:
-    """
-    Read text from a PDF using PyPDF2 (if available). If PyPDF2 isn't installed,
-    the test that needs text will be skipped.
-    """
+    """Read text from a PDF. Skip test if pypdf is unavailable."""
     try:
         from pypdf import PdfReader  # type: ignore
     except Exception as e:
-        pytest.skip(f"PyPDF2 not installed to read PDF text: {e}")
+        pytest.skip(f"pypdf not installed to read PDF text: {e}")
     reader = PdfReader(path)
-    text_chunks = []
+    chunks = []
     for page in reader.pages:
         try:
-            text_chunks.append(page.extract_text() or "")
+            chunks.append(page.extract_text() or "")
         except Exception:
-            # Some readers may fail to extract; keep best-effort
             continue
-    return "\n".join(text_chunks)
+    return "\n".join(chunks)
 
-# --- fixtures ----------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def sample_number() -> str:
-    # Matches a fixture under output/grading_results/.
-    return "00000"
+def _write_analysis_csv(dirpath: Path, sample: str, stage: int, trial: int,
+                        grade_name: str, predicted_grade: str) -> None:
+    """Write an analysis CSV mirroring histogram_analysis.py output format.
+
+    Filename: {sample}-{stage}-{trial}-{grade}-analysis.csv
+    Payload:  headers, 8 image rows, Average row, Grade row, Backend row.
+    """
+    fname = f"{sample}-{stage}-{trial}-{grade_name}-analysis.csv"
+    path = dirpath / fname
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["Image", "Mean", "Std", "Max", "Mode"])
+        for i in range(1, 9):
+            w.writerow([f"{sample}-{stage}-{trial}-{i}-dif.png", 8.0, 0.0, 8.0, 8.0])
+        w.writerow(["Average", 8.0, 0.0, 8.0, 8.0])
+        w.writerow(["Grade", predicted_grade, "", "", ""])
+        w.writerow(["Backend", "itanet_dll", "", "", ""])
+
 
 @pytest.fixture
-def clean_reports_dir(tmp_path):
-    """
-    Redirect the 'reports' directory used by export_results to a temp folder by
-    chdir into project root and creating a 'reports' folder there.
-    After test, cleanup happens automatically with tmp_path.
-    """
-    # Move into project root (this test file is in .../Automated_Pilling_Grade_Classifier/app/tests/)
+def grading_results_dir(tmp_path, monkeypatch):
+    """Redirect cfg.GRADING_RESULTS_DIR + cfg.REPORTS_DIR to tmp_path so tests
+    are self-contained and don't touch the real output/reports trees."""
+    from app.settings import config as cfg
+    results_dir = tmp_path / "grading_results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+    reports_dir.mkdir()
+    monkeypatch.setattr(cfg, "GRADING_RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(cfg, "REPORTS_DIR", str(reports_dir))
+
+    # export_results reads reports_dir at call time; chdir so relative paths
+    # (used by generate_pilling_report for the logo image) still resolve to
+    # the project root.
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     cwd_before = os.getcwd()
     os.chdir(project_root)
-
-    # Backup any existing 'reports' and use a temporary one for the test
-    backup_dir = None
-    if os.path.isdir("reports"):
-        backup_dir = tempfile.mkdtemp(prefix="reports_backup_")
-        shutil.move("reports", backup_dir)
-
-    os.makedirs("reports", exist_ok=True)
-    yield
-
-    # Cleanup: remove the temp reports created during test
     try:
-        shutil.rmtree("reports", ignore_errors=True)
-    except Exception:
-        pass
+        yield {"results": results_dir, "reports": reports_dir}
+    finally:
+        os.chdir(cwd_before)
 
-    # Restore previous reports if any
-    if backup_dir:
-        shutil.move(os.path.join(backup_dir, "reports"), project_root)
-        shutil.rmtree(backup_dir, ignore_errors=True)
 
-    os.chdir(cwd_before)
+# --- scan + build unit tests -------------------------------------------------
 
-# --- tests -------------------------------------------------------------------
+class TestScanStageResultsForSample:
+    def test_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
+        from app.settings import config as cfg
+        monkeypatch.setattr(cfg, "GRADING_RESULTS_DIR", str(tmp_path / "missing"))
+        assert _scan_stage_results_for_sample("001", "pilling") == {}
 
-@pytest.mark.pdf
-def test_scan_collects_dynamic_stages(sample_number):
-    """
-    Ensures scanning finds all stage CSVs and returns sorted rub counts.
-    """
-    # Lazy import after conftest stubbed streamlit
-    utils = importlib.import_module("app.helpers.utils")
-    # Given attachments, expect these six stages
-    expected = {100, 200, 300, 600, 700}
-    results = utils._scan_stage_results_for_sample(sample_number)
-    assert set(results.keys()) == expected, f"Found rub levels: {sorted(results.keys())}"
+    def test_filters_by_grade(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "007", 100, 1, "pilling", "3")
+        _write_analysis_csv(d, "007", 100, 1, "matting", "2.5")
+        _write_analysis_csv(d, "007", 100, 1, "fuzzing", "4")
 
-    # Also ensure each entry has a non-empty grade string
-    assert all(str(v).strip() for v in results.values())
+        assert _scan_stage_results_for_sample("007", "pilling") == {100: ["3"]}
+        assert _scan_stage_results_for_sample("007", "matting") == {100: ["2.5"]}
+        assert _scan_stage_results_for_sample("007", "fuzzing") == {100: ["4"]}
 
-@pytest.mark.pdf
-def test_export_results_creates_single_pdf_and_contains_expected_text(sample_number, clean_reports_dir):
-    """
-    End-to-end: export_results should produce one combined PDF per sample, with:
-    - Title and ISO statement
-    - Details (sample, abradant, operator, load)
-    - Rows for all discovered rub levels (dynamic)
-    """
-    utils = importlib.import_module("app.helpers.utils")
-    operator = "UnitTest"
-    load_weight = "150"
-    # stage_number is not used for combining; any string is fine
-    ok = utils.export_results(sample_number, stage_number="100", load_weight=load_weight, operator_name=operator)
-    assert ok is True
+    def test_collects_multiple_stages(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        for stage in (100, 200, 500):
+            _write_analysis_csv(d, "007", stage, 1, "pilling", "3")
 
-    # The report filename pattern created by export_results
-    pdf_path = os.path.join("reports", f"{sample_number}-{operator}-report.pdf")
-    assert os.path.isfile(pdf_path), f"Expected PDF at {pdf_path}"
+        result = _scan_stage_results_for_sample("007", "pilling")
+        assert sorted(result.keys()) == [100, 200, 500]
 
-    # Give the filesystem a brief moment on Windows
-    time.sleep(0.2)
+    def test_collects_multiple_trials_per_stage(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        for trial, val in enumerate(["3", "2.5", "3.5"], start=1):
+            _write_analysis_csv(d, "007", 100, trial, "pilling", val)
 
-    text = _read_pdf_text(pdf_path)
+        result = _scan_stage_results_for_sample("007", "pilling")
+        assert result == {100: ["2.5", "3", "3.5"]}
 
-    # Header and statement
-    assert "Pilling Test Report" in text
-    assert "ISO-12945-2 standards" in text
+    def test_ignores_other_samples(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "007", 100, 1, "pilling", "3")
+        _write_analysis_csv(d, "999", 100, 1, "pilling", "5")
 
-    # Details
-    assert f"Sample Number: {sample_number}" in text
-    assert "Abradant used: Similar Fabric" in text
-    assert f"Operator Name: {operator}" in text
-    assert f"Loading Weight (gms): {load_weight}" in text
+        assert _scan_stage_results_for_sample("007", "pilling") == {100: ["3"]}
 
-    # Dynamic rows for all available stages
-    for rub in (100, 200, 300, 600):
-        assert f"{rub} rev." in text
+    def test_skips_malformed_csv(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        # A file whose contents lack a "Grade" row should be quietly skipped.
+        bad = d / "007-100-1-pilling-analysis.csv"
+        bad.write_text("Image,Mean\n007-100-1-1-dif.png,8.0\n", encoding="utf-8")
+        assert _scan_stage_results_for_sample("007", "pilling") == {}
 
-@pytest.mark.pdf
-def test_generate_pilling_report_mimics_combined_report(sample_number, tmp_path):
-    """
-    Focus on main PDF logic only: generate a report for a predefined set of rub levels
-    and verify expected text without importing Streamlit-dependent utilities.
-    """
-    operator = "UnitTest"
-    load_weight = "150"
-    rub_levels = [100, 200, 300, 320, 550, 600]
-    # Provide mirrored/symmetric panel grades as strings, as used by the app
-    results_by_rubs = {
-        100: ["3", "3", "3", "3"],
-        200: ["3", "3", "3", "3"],
-        300: ["3", "3", "3", "3"],
-        320: ["3", "3", "3", "3"],
-        550: ["3", "3", "3", "3"],
-        600: ["3", "3", "3", "3"],
-    }
-    out_file = tmp_path / f"{sample_number}-{operator}-report.pdf"
 
-    ok = generate_pilling_report(
-        sample_number=sample_number,
-        stage_number=None,
-        load_weight_g=load_weight,
-        operator_name=operator,
-        results_by_rubs=results_by_rubs,
-        output_path=str(out_file),
-        rub_levels=rub_levels,
-    )
-    assert ok is True
-    assert out_file.exists()
+class TestBuildByRubs:
+    def test_single_trial_pads_with_na(self):
+        assert _build_by_rubs({100: ["3"]}) == {100: ["3", "NA", "NA", "3"]}
 
-    # Give the filesystem a brief moment on Windows
-    time.sleep(0.2)
+    def test_two_trials_averaged(self):
+        assert _build_by_rubs({100: ["3", "4"]}) == {100: ["3", "4", "NA", "3.50"]}
 
-    text = _read_pdf_text(str(out_file))
+    def test_three_trials_averaged(self):
+        assert _build_by_rubs({100: ["3", "3.5", "4"]}) == {100: ["3", "3.5", "4", "3.50"]}
 
-    # Header and statement
-    assert "Pilling Test Report" in text
-    assert "ISO-12945-2 standards" in text
+    def test_more_than_three_trials_uses_first_three(self):
+        # Column layout is fixed at 3 result columns; extras must not crash.
+        result = _build_by_rubs({100: ["3", "3", "3", "5"]})
+        assert result == {100: ["3", "3", "3", "3.00"]}
 
-    # Details
-    assert f"Sample Number: {sample_number}" in text
-    assert "Abradant used: Similar Fabric" in text
-    assert f"Operator Name: {operator}" in text
-    assert f"Loading Weight (gms): {load_weight}" in text
 
-    # Rows for provided stages
-    for rub in rub_levels:
-        assert f"{rub} rev." in text
+# --- export_results end-to-end (per-grade) -----------------------------------
 
-@pytest.mark.pdf
-def test_generate_pilling_report_accepts_custom_levels(tmp_path):
-    """
-    Unit test for the PDF generator with custom rub levels and mirrored results.
-    """
-    out_file = tmp_path / "custom.pdf"
-    results_by_rubs = {
-        75: ["2.5", "2.5", "2.5", "2.5"],
-        150: ["3", "3", "3", "3"],
-    }
-    ok = generate_pilling_report(
-        sample_number="XYZ",
-        stage_number=None,
-        load_weight_g="123",
-        operator_name="Tester",
-        results_by_rubs=results_by_rubs,
-        output_path=str(out_file),
-        rub_levels=[75, 150],
-    )
-    assert ok is True
-    assert out_file.exists()
+class TestExportResultsPerGrade:
+    def _seed_all_grades(self, d: Path, sample: str, stages=(100, 200, 300)):
+        for stage in stages:
+            _write_analysis_csv(d, sample, stage, 1, "pilling", "3")
+            _write_analysis_csv(d, sample, stage, 1, "matting", "2.5")
+            _write_analysis_csv(d, sample, stage, 1, "fuzzing", "4")
 
-    text = _read_pdf_text(str(out_file))
-    assert "Pilling Test Report" in text
-    assert "75 rev." in text and "150 rev." in text
+    def test_returns_false_when_no_csvs(self, grading_results_dir):
+        assert export_results("999", "100", "150", "Op") is False
 
-_TRIAL_SCENARIOS = {
-    # one grade per rub + NA placeholders + average
-    "single_trial": {
+    def test_produces_pdf_when_only_pilling_present(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "011", 100, 1, "pilling", "3")
+
+        assert export_results("011", "100", "150", "Op") is True
+        pdf = grading_results_dir["reports"] / "011-Op-report.pdf"
+        assert pdf.exists()
+
+    def test_produces_pdf_with_all_three_grades(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        self._seed_all_grades(d, "012")
+
+        assert export_results("012", "100", "150", "Op") is True
+        pdf = grading_results_dir["reports"] / "012-Op-report.pdf"
+        assert pdf.exists()
+
+        text = _read_pdf_text(str(pdf))
+        assert "Pilling" in text
+        assert "Matting" in text
+        assert "Fuzzing" in text
+        for rub in (100, 200, 300):
+            assert f"{rub} rev." in text
+
+    def test_matting_only_still_produces_pdf(self, grading_results_dir):
+        """If only matting has CSVs (unusual but possible), the report should
+        still list its rub levels."""
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "013", 100, 1, "matting", "2.5")
+        _write_analysis_csv(d, "013", 200, 1, "matting", "3")
+
+        assert export_results("013", "100", "150", "Op") is True
+        pdf = grading_results_dir["reports"] / "013-Op-report.pdf"
+        assert pdf.exists()
+        text = _read_pdf_text(str(pdf))
+        assert "100 rev." in text
+        assert "200 rev." in text
+
+    def test_operator_name_sanitized_in_filename(self, grading_results_dir):
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "014", 100, 1, "pilling", "3")
+
+        assert export_results("014", "100", "150", "Op Test!@#") is True
+        # Non-alnum stripped except '-' and '_'
+        assert (grading_results_dir["reports"] / "014-OpTest-report.pdf").exists()
+
+
+# --- generate_pilling_report direct unit tests ------------------------------
+
+@pytest.mark.parametrize("scenario_id,scenario", [
+    ("single_trial", {
         "sample_number": "001",
         "operator": "SingleTrialTest",
         "rub_levels": [100, 200, 300],
@@ -248,8 +240,8 @@ _TRIAL_SCENARIOS = {
             200: ["3", "NA", "NA", "3"],
             300: ["2.5", "NA", "NA", "2.5"],
         },
-    },
-    "two_trials": {
+    }),
+    ("two_trials", {
         "sample_number": "002",
         "operator": "TwoTrialTest",
         "rub_levels": [100, 200, 300, 320],
@@ -259,8 +251,8 @@ _TRIAL_SCENARIOS = {
             300: ["2.5", "2.5", "NA", "2.5"],
             320: ["2", "2.5", "NA", "2.25"],
         },
-    },
-    "three_trials": {
+    }),
+    ("three_trials", {
         "sample_number": "003",
         "operator": "ThreeTrialTest",
         "rub_levels": [100, 200, 300, 550, 600],
@@ -271,37 +263,20 @@ _TRIAL_SCENARIOS = {
             550: ["2.5", "2", "2.5", "2.33"],
             600: ["2", "2", "2.5", "2.17"],
         },
-    },
-    # edge case: different number of trials per rub level
-    "mixed_trials": {
-        "sample_number": "004",
-        "operator": "MixedTrialsTest",
-        "rub_levels": [100, 200, 300],
-        "results_by_rubs": {
-            100: ["4", "NA", "NA", "4"],
-            200: ["3.5", "3", "NA", "3.25"],
-            300: ["3", "2.5", "3", "2.83"],
-        },
-    },
-}
-
-
-@pytest.mark.pdf
-@pytest.mark.parametrize("scenario_id", list(_TRIAL_SCENARIOS.keys()))
-def test_generate_pilling_report_trial_scenarios(tmp_path, scenario_id):
-    """PDF generation across single/two/three/mixed-trial result shapes."""
-    s = _TRIAL_SCENARIOS[scenario_id]
-    load_weight = "150"
-    out_file = tmp_path / f"{s['sample_number']}-{s['operator']}-{scenario_id}.pdf"
+    }),
+])
+def test_generate_pilling_report_trial_scenarios(tmp_path, scenario_id, scenario):
+    """PDF generation across single/two/three-trial result shapes."""
+    out_file = tmp_path / f"{scenario['sample_number']}-{scenario['operator']}-{scenario_id}.pdf"
 
     ok = generate_pilling_report(
-        sample_number=s["sample_number"],
+        sample_number=scenario["sample_number"],
         stage_number=None,
-        load_weight_g=load_weight,
-        operator_name=s["operator"],
-        results_by_rubs=s["results_by_rubs"],
+        load_weight_g="150",
+        operator_name=scenario["operator"],
+        results_by_rubs=scenario["results_by_rubs"],
         output_path=str(out_file),
-        rub_levels=s["rub_levels"],
+        rub_levels=scenario["rub_levels"],
     )
     assert ok is True
     assert out_file.exists()
@@ -310,23 +285,82 @@ def test_generate_pilling_report_trial_scenarios(tmp_path, scenario_id):
     text = _read_pdf_text(str(out_file))
 
     assert "Pilling Test Report" in text
-    assert f"Sample Number: {s['sample_number']}" in text
-    assert f"Operator Name: {s['operator']}" in text
-    for rub in s["rub_levels"]:
+    assert f"Sample Number: {scenario['sample_number']}" in text
+    assert f"Operator Name: {scenario['operator']}" in text
+    for rub in scenario["rub_levels"]:
         assert f"{rub} rev." in text
 
 
+def test_generate_pilling_report_with_all_three_grade_columns(tmp_path):
+    """When matting_by_rubs and fuzzing_by_rubs are provided, the PDF should
+    include all three grade section labels."""
+    results_by_rubs = {100: ["3", "3", "3", "3"], 200: ["3", "3", "3", "3"]}
+    matting_by_rubs = {100: ["2.5", "NA", "NA", "2.5"], 200: ["3", "NA", "NA", "3"]}
+    fuzzing_by_rubs = {100: ["4", "NA", "NA", "4"], 200: ["3.5", "NA", "NA", "3.5"]}
+    out_file = tmp_path / "all-grades.pdf"
+
+    ok = generate_pilling_report(
+        sample_number="ABC",
+        stage_number=None,
+        load_weight_g="150",
+        operator_name="Op",
+        results_by_rubs=results_by_rubs,
+        matting_by_rubs=matting_by_rubs,
+        fuzzing_by_rubs=fuzzing_by_rubs,
+        output_path=str(out_file),
+        rub_levels=[100, 200],
+    )
+    assert ok is True
+    assert out_file.exists()
+
+    text = _read_pdf_text(str(out_file))
+    assert "Pilling" in text
+    assert "Matting" in text
+    assert "Fuzzing" in text
+
+
 # --- visual check entrypoint -------------------------------------------------
-# Running the file directly (not via pytest) writes one PDF per _TRIAL_SCENARIOS
-# entry so a developer can open them and verify the layout looks right. None of
-# the pytest test functions run in this mode — only the __main__ block does.
+# Running the file directly writes one PDF per scenario to reports/visual_tests/
+# for eyeballing layout.
+
+_VISUAL_SCENARIOS = {
+    "single_trial": {
+        "sample_number": "001", "operator": "SingleTrialTest",
+        "rub_levels": [100, 200, 300],
+        "results_by_rubs": {
+            100: ["3", "NA", "NA", "3"],
+            200: ["3", "NA", "NA", "3"],
+            300: ["2.5", "NA", "NA", "2.5"],
+        },
+    },
+    "three_trials_all_grades": {
+        "sample_number": "003", "operator": "AllGrades",
+        "rub_levels": [100, 200, 300],
+        "results_by_rubs": {
+            100: ["4", "3.5", "4", "3.83"],
+            200: ["3.5", "3", "3.5", "3.33"],
+            300: ["3", "3", "2.5", "2.83"],
+        },
+        "matting_by_rubs": {
+            100: ["2.5", "2.5", "3", "2.67"],
+            200: ["3", "2.5", "3", "2.83"],
+            300: ["3.5", "3", "3", "3.17"],
+        },
+        "fuzzing_by_rubs": {
+            100: ["4", "4.5", "4", "4.17"],
+            200: ["4", "3.5", "4", "3.83"],
+            300: ["3.5", "3", "3.5", "3.33"],
+        },
+    },
+}
+
 
 if __name__ == "__main__":
     output_dir = Path("reports") / "visual_tests"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     successes = 0
-    for scenario_id, s in _TRIAL_SCENARIOS.items():
+    for scenario_id, s in _VISUAL_SCENARIOS.items():
         out = output_dir / f"{s['sample_number']}-{s['operator']}-{scenario_id}.pdf"
         ok = generate_pilling_report(
             sample_number=s["sample_number"],
@@ -334,6 +368,8 @@ if __name__ == "__main__":
             load_weight_g="150",
             operator_name=s["operator"],
             results_by_rubs=s["results_by_rubs"],
+            matting_by_rubs=s.get("matting_by_rubs"),
+            fuzzing_by_rubs=s.get("fuzzing_by_rubs"),
             output_path=str(out),
             rub_levels=s["rub_levels"],
         )
@@ -342,5 +378,5 @@ if __name__ == "__main__":
             successes += 1
         else:
             print(f"  [fail] {out}")
-    print(f"\nGenerated {successes}/{len(_TRIAL_SCENARIOS)} PDFs.")
-    sys.exit(0 if successes == len(_TRIAL_SCENARIOS) else 1)
+    print(f"\nGenerated {successes}/{len(_VISUAL_SCENARIOS)} PDFs.")
+    sys.exit(0 if successes == len(_VISUAL_SCENARIOS) else 1)

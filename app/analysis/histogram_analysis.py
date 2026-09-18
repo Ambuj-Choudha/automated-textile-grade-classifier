@@ -259,7 +259,7 @@ def analyze_difference_images_and_predict_output(
             if prediction is None:
                 continue
             rows_for_csv = all_stats_with_avg + [
-                [f"Grade ({grade})", prediction, "", "", ""],
+                ["Grade", prediction, "", "", ""],
                 ["Backend", cfg.BACKEND, "", "", ""],
             ]
             analysis_csv = os.path.join(

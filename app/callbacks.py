@@ -90,7 +90,7 @@ def export_results_callback(sample_number, stage_number, load_weight, trial_numb
             return
 
         success = export_results(sample_number, stage_number, load_weight, operator,
-                                 trial_number=trial_number, grades=grades)
+                                 trial_number=trial_number)
 
         if success:
             st.session_state[S.KEY_EXPORT_SUCCESS] = (
