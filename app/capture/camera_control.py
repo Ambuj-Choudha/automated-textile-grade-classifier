@@ -1,4 +1,5 @@
 import os
+import hashlib
 import numpy as np
 from PIL import Image
 from app.helpers.utils import ensure_directory
@@ -30,8 +31,7 @@ def _mock_capture(sample_number: str, stage_number: str, trial_number: str, suff
     ensure_directory(input_dir)
 
     H, W = 480, 640
-    # Seed from inputs so re-runs for the same sample/stage are identical
-    seed = hash((sample_number, trial_number)) % (2 ** 32)
+    seed = int(hashlib.md5(f"{sample_number}{trial_number}".encode()).hexdigest(), 16) % (2 ** 32)
     rng = np.random.default_rng(seed)
 
     # Stage 0 is the clean baseline; higher stages are progressively "pilled"
@@ -70,12 +70,11 @@ def _get_image_from_cam(camera, target_path, img, save_file=True, file_name="Tes
             temp_bmp_path = os.path.join(target_path, "temp_image.bmp")
             final_path = os.path.join(target_path, file_name)
             img.Save(pylon.ImageFileFormat_Bmp, temp_bmp_path)
-            import cv2 as _cv2
-            image_cv = _cv2.imread(temp_bmp_path)
+            image_cv = cv2.imread(temp_bmp_path)
             if image_cv is None:
                 raise RuntimeError(f"Failed to load temporary BMP file: {temp_bmp_path}")
             if save_file:
-                _cv2.imwrite(final_path, image_cv, [int(_cv2.IMWRITE_JPEG_QUALITY), 100])
+                cv2.imwrite(final_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
                 print(f"Saved image to: {final_path}")
             os.remove(temp_bmp_path)
             img.Release()
@@ -97,6 +96,7 @@ def _real_capture(sample_number: str, stage_number: str, trial_number: str, suff
 
     print(f"Connecting to motor at {motor_ip}:{motor_port}")
     for i in range(1, 9):
+        cam = None
         try:
             cam = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
             cam.Open()
@@ -110,7 +110,7 @@ def _real_capture(sample_number: str, stage_number: str, trial_number: str, suff
             print(f"Unexpected error: {e}")
             return False
         finally:
-            if "cam" in locals():
+            if cam is not None:
                 cam.Close()
 
         if motor_ip:
