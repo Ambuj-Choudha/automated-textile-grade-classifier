@@ -35,10 +35,8 @@ All paths and runtime settings live in [app/settings/config.py](../../app/settin
 ```python
 BACKEND            = "itanet_dll"                    # or "tf" for the TensorFlow path
 ITANET_ROOT        = "models/itanet"
-ITANET_RUN_DIR     = "models/itanet/run"             # CWD when the DLL is called
-ITANET_FLS_DIR     = "models/itanet/data"            # recall.fls / training.fls
-ITANET_ARCHIVE_DIR = "models/itanet/archive"         # backups before each train
-DLL_PATH           = "models/itanet/run/itanet.dll"
+GRADES             = ("pilling", "matting", "fuzzing")
+DLL_PATH           = "models/itanet/itanet.dll"      # shared DLL, loaded by absolute path
 TF_MODEL_PATH      = "models/tf/my_model.h5"
 FEATURE_COLUMNS    = ("Mean", "Std", "Max", "Mode")
 DECIMAL            = "Point"
@@ -46,7 +44,10 @@ ROUND_TO_HALF      = True
 CLIP_RANGE         = (1.0, 5.0)
 ```
 
-`ITANET_DATA_DIR` is kept as a legacy alias for `ITANET_RUN_DIR` so callers that predate the run/data split keep working.
+Per-grade paths are resolved via builder functions:
+- `get_itanet_run_dir(grade)` → `models/itanet/{grade}/run/`  (CWD when the DLL is called)
+- `get_itanet_fls_dir(grade)` → `models/itanet/{grade}/data/`  (recall.fls / training.fls)
+- `get_itanet_archive_dir(grade)` → `models/itanet/archive/{grade}/`
 
 UI theme (optional): `.streamlit/config.toml`.
 

@@ -102,6 +102,10 @@ DECIMAL = "Point"
 ROUND_TO_HALF = True
 CLIP_RANGE: Tuple[float, float] = (1.0, 5.0)
 
+# ---- Application settings ----
+
+ADMIN_PASSWORD = "1234"
+
 # ---- Optional custom model overrides ----
 
 CUSTOM_NET = None

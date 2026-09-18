@@ -189,6 +189,7 @@ def csv_to_training_dats(
 def train_from_csv(
     csv_path: str,
     *,
+    grade: str = "pilling",
     net_type: int = CREATE_NEW_NET,
     decimal: DecimalMode = "comma",
     shuffle: int = SHUFFLE_ON,
@@ -196,20 +197,21 @@ def train_from_csv(
 ) -> Path:
     """End-to-end: CSV -> .dat files -> run training -> return trained .NET path.
 
-    Trained weights are written back into ``models/itanet/run/Neuronalesnetz.NET``.
-    Recall reads the same file, so no post-training copy step is required.
+    ``grade`` selects which ITA-Net network to train (pilling / matting / fuzzing).
+    Each grade has its own run/ + data/ directory under models/itanet/<grade>/.
 
     ``net_type=CREATE_NEW_NET`` (default) requires the .NET to still be in
     pristine topology-only form. ``net_type=LOAD_FROM_FILE`` continues
-    training from the current weights. Both are checked before training runs.
+    training from the current weights.
 
     When ``backup`` is True (default), the existing .NET + .TRN are
-    snapshotted to ``models/itanet/archive/<UTC>/`` first.
+    snapshotted to ``models/itanet/archive/<grade>/<UTC>/`` first.
     """
-    run_dir_p = Path(default_run_dir())
-    fls_dir_p = Path(default_fls_dir())
-    dll_path_s = default_dll_path()
-    archive_dir_p = run_dir_p.parent / "archive"
+    from app.settings import config as cfg
+    run_dir_p = Path(cfg.get_itanet_run_dir(grade))
+    fls_dir_p = Path(cfg.get_itanet_fls_dir(grade))
+    dll_path_s = cfg.DLL_PATH
+    archive_dir_p = Path(cfg.get_itanet_archive_dir(grade))
     csv_path_p = Path(csv_path).resolve()
 
     if not csv_path_p.exists():
@@ -277,7 +279,12 @@ def main() -> None:
     parser.add_argument(
         "csv_path",
         help="Feature CSV with Mean/Std/Max/Mode + Grade columns "
-             "(e.g. data/training_features/per_image_features.csv).",
+             "(e.g. data/training_features/pilling_per_image_features.csv).",
+    )
+    parser.add_argument(
+        "--grade", default="pilling",
+        choices=["pilling", "matting", "fuzzing"],
+        help="Which grade network to train (default: pilling).",
     )
     parser.add_argument(
         "--net-type", type=int, default=CREATE_NEW_NET,
@@ -304,6 +311,7 @@ def main() -> None:
 
     train_from_csv(
         csv_path=args.csv_path,
+        grade=args.grade,
         net_type=args.net_type,
         decimal=args.decimal,
         shuffle=args.shuffle,
