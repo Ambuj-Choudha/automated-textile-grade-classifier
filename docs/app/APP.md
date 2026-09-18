@@ -55,13 +55,14 @@ UI theme (optional): `.streamlit/config.toml`.
 
 Auto-created at runtime, all `.gitignored` (see the [root README](../../README.md#folder-layout) for the same table aimed at users):
 
-- `data/input_pictures/`, `data/reference_pictures/`, `data/difference_pictures/` — raw, reference, and computed images
-- `data/training_features/` — feature CSVs the training CLI consumes
-- `output/grading_results/` — per-trial prediction CSVs
+- `data/input_pictures/{for_grading,for_training}/`, `data/difference_pictures/{for_grading,for_training}/` — raw and computed images (stage 0 is the reference)
+- `data/training_features/` — per-grade feature CSVs the training CLI consumes
+- `output/grading_results/` — per-trial, per-grade prediction CSVs (`{sample}-{stage}-{trial}-{grade}-analysis.csv`)
 - `reports/` — exported PDFs
-- `models/itanet/run/` — DLL, trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files (DLL's cwd)
-- `models/itanet/data/` — `recall.fls` and `training.fls` (opened by the DLL as `..\data\*.fls`)
-- `models/itanet/archive/` — timestamped `.NET` + `.TRN` snapshots taken before each training run
+- `models/itanet/itanet.dll` — shared DLL used by all three grade networks
+- `models/itanet/{grade}/run/` — trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files for that grade (DLL's cwd)
+- `models/itanet/{grade}/data/` — `recall.fls` and `training.fls` (opened by the DLL as `..\data\*.fls`)
+- `models/itanet/archive/{grade}/` — timestamped `.NET` + `.TRN` snapshots taken before each training run
 - `models/tf/` — TensorFlow backend model
 
 Data directories are safe to delete and recreate — the app repopulates them.

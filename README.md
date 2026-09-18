@@ -1,6 +1,6 @@
-# Automated Pilling Grade Classifier
+# Automated Textile Grade Classifier
 
-A prototype for automating textile quality assessment. It captures images on a Basler camera, compares them against a reference shot, and predicts a pilling grade (1.0 – 5.0 in 0.5 steps) using either a trained neural network (ITA-Net) or a tensorflow based deep learning model.
+A prototype for automating textile quality assessment. It captures images on a Basler camera, compares them against a stage-0 reference shot, and predicts one or more grades — **pilling**, **matting**, and **fuzzing** (each 1.0 – 5.0 in 0.5 steps) — using either a trained neural network per grade (ITA-Net) or a TensorFlow-based deep learning model.
 
 This document walks through the full workflow end to end: 
 **install → collect labeled samples → train the model → check the trained model → grade new samples**. 
@@ -42,20 +42,22 @@ python -m streamlit run app.py
 It opens at <http://localhost:8501>.
 
 1. Pick **Training Mode** and log in (default password: `1234`).
-2. Enter operator name, sample number, stage (rubs), trial number, and the **known grade** (1.0 – 5.0 in 0.5 steps).
-3. Click **Capture**. The app captures 8 rotational images, builds difference images against the stage-0 reference, extracts a feature vector (`Mean`, `Std`, `Max`, `Mode`), and appends a row to two CSVs under `data/training_features/`:
-   - `per_image_features.csv` — one row per difference image (8 rows per sample)
-   - `averaged_features.csv` — one averaged row per sample
+2. Enter operator name, sample number, stage (rubs), trial number, and the **known grades** (1.0 – 5.0 in 0.5 steps) for each active grade type (pilling / matting / fuzzing).
+3. Click **Capture**. The app captures 8 rotational images, builds difference images against the stage-0 reference, extracts a feature vector (`Mean`, `Std`, `Max`, `Mode`), and appends a row to a pair of CSVs *per active grade* under `data/training_features/`:
+   - `{grade}_per_image_features.csv` — one row per difference image (8 rows per sample)
+   - `{grade}_averaged_features.csv` — one averaged row per sample
 4. Repeat for as many labeled samples as you can. More variety across grades and rub counts means a better model.
 
 You can quit and resume later — the CSVs are appended on every capture.
 
 ## 3. Train the ITA-Net model
 
-Once you've collected enough training samples, run training from the command line (with the environment activated):
+Once you've collected enough training samples, run training from the command line (with the environment activated). Each grade has its own network — train them one at a time with `--grade`:
 
 ```bash
-python itanet_training.py data\training_features\averaged_features.csv
+python itanet_training.py data\training_features\pilling_averaged_features.csv --grade pilling
+python itanet_training.py data\training_features\matting_averaged_features.csv --grade matting
+python itanet_training.py data\training_features\fuzzing_averaged_features.csv --grade fuzzing
 ```
 
 What happens:
@@ -76,7 +78,7 @@ Options:
 | `--shuffle N` | `1` | `1` = shuffle training patterns, `0` = preserve original order. |
 | `--no-backup` | off | Skip archiving the existing `.NET` + `.TRN`. |
 
-Paths are fixed: the DLL, `.NET`, `.TRN`, and `.dat` files live in `models/itanet/run/`; the `.fls` filelists in `models/itanet/data/`; archives in `models/itanet/archive/`. Override these in [`app/settings/config.py`](app/settings/config.py) if you need a non-standard layout.
+Paths are per-grade: the DLL, `.NET`, `.TRN`, and `.dat` files live in `models/itanet/{grade}/run/`; the `.fls` filelists in `models/itanet/{grade}/data/`; archives in `models/itanet/archive/{grade}/`. The shared DLL sits at `models/itanet/itanet.dll`. Override these in [`app/settings/config.py`](app/settings/config.py) if you need a non-standard layout.
 
 If you want to check the trained model against known samples (recall)
 
@@ -85,7 +87,7 @@ If you want to check the trained model against known samples (recall)
 Run recall on any analysis CSV directly
 
 ```bash
-python itanet_recall.py output\grading_results\<sample>-<stage>-<trial>-analysis.csv
+python itanet_recall.py output\grading_results\<sample>-<stage>-<trial>-<grade>-analysis.csv
 ```
 
 Summary rows (`Average`, `Grade`, `Backend`) at the bottom are filtered out automatically.
@@ -95,10 +97,11 @@ Summary rows (`Average`, `Grade`, `Backend`) at the bottom are filtered out auto
 In the app, pick **Grading Mode**:
 
 1. Enter operator name, sample number, stage, trial, and load weight.
-2. Click **Capture** — the app takes 8 images, generates the features (Mean/Std/Max/Mode), calls ITA-Net for prediction, and shows the grade on screen.
-3. Click **Export Results** to save a PDF report under `reports/`.
+2. Pick the active grades in the sidebar (any subset of pilling / matting / fuzzing).
+3. Click **Capture** — the app takes 8 images, generates the features (Mean/Std/Max/Mode), calls each selected grade's ITA-Net for prediction, and shows the grades on screen.
+4. Click **Export Results** to save a combined PDF report under `reports/` — one column-group per grade that has data.
 
-Per-trial analysis statistics are saved in `output/grading_results/` (one CSV per `<sample>-<stage>-<trial>`), so you can always re-inspect the raw features the ITANET model used.
+Per-trial analysis statistics are saved in `output/grading_results/` (one CSV per `<sample>-<stage>-<trial>-<grade>`), so you can always re-inspect the raw features each ITA-Net model used.
 
 ## Folder layout
 
@@ -106,15 +109,15 @@ All folders below are auto-created at runtime and `.gitignored` — they hold lo
 
 | Folder | What's in it |
 |---|---|
-| `data/input_pictures/` | Raw 8-image capture sets from the camera |
-| `data/reference_pictures/` | Stage-0 reference shots (one per sample/trial) |
-| `data/difference_pictures/` | Generated difference images (current vs. reference) |
-| `data/training_features/` | Feature CSVs (Mean/Std/Max/Mode + Grade) — inputs to `itanet_training.py` |
-| `output/grading_results/` | Per-trial prediction CSVs |
+| `data/input_pictures/{for_grading,for_training}/` | Raw 8-image capture sets from the camera (stage-0 is the reference; higher stages are the pilled samples) |
+| `data/difference_pictures/{for_grading,for_training}/` | Generated difference images (current vs. stage-0 reference) |
+| `data/training_features/` | Per-grade feature CSVs (Mean/Std/Max/Mode + Grade) — inputs to `itanet_training.py` |
+| `output/grading_results/` | Per-trial, per-grade prediction CSVs (`{sample}-{stage}-{trial}-{grade}-analysis.csv`) |
 | `reports/` | Exported PDF reports |
-| `models/itanet/run/` | DLL, trained `Neuronalesnetz.NET`, `.TRN`, and the training/recall `.dat` files (the DLL's working directory) |
-| `models/itanet/data/` | `recall.fls` and `training.fls` — filelists the DLL opens as `..\data\*.fls` from the run dir |
-| `models/itanet/archive/` | Timestamped backups of `Neuronalesnetz.NET` + `.TRN` from before each training run |
+| `models/itanet/itanet.dll` | Shared DLL (loaded once, used by all three grade networks) |
+| `models/itanet/{grade}/run/` | Trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files for that grade (the DLL's cwd at call time) |
+| `models/itanet/{grade}/data/` | `recall.fls` and `training.fls` — filelists the DLL opens as `..\data\*.fls` from the run dir |
+| `models/itanet/archive/{grade}/` | Timestamped backups of `Neuronalesnetz.NET` + `.TRN` from before each training run |
 | `models/tf/` | TensorFlow backend model (alternate prediction path) |
 
 The only scripts at the root you would run:
@@ -129,4 +132,4 @@ The only scripts at the root you would run:
 - **ITA-Net integration internals (DLL contract, file formats, recall data flow)** → [docs/itanet/WORKFLOW.md](docs/itanet/WORKFLOW.md)
 - **Rebuilding the model bundle from C source** → [docs/itanet/BACKEND_SETUP.md](docs/itanet/BACKEND_SETUP.md)
 
-Issues and feedback: open a ticket at <https://github.com/Akshat-Shandilya/Automated_Pilling_Grade_Classifier>.
+Issues and feedback: open a ticket at <https://github.com/Ambuj-Choudha/automated-textile-grade-classifier>.
