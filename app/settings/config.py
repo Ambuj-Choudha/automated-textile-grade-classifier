@@ -68,6 +68,15 @@ INPUT_PICTURES_DIR = os.path.join(DATA_DIR, "input_pictures")
 DIFFERENCE_PICTURES_DIR = os.path.join(DATA_DIR, "difference_pictures")
 TRAINING_FEATURES_DIR = os.path.join(DATA_DIR, "training_features")
 
+# ---- Motor settings ----
+# Each capture cycle is MOTOR_STEPS_PER_CYCLE rotations of MOTOR_DEGREES_PER_STEP.
+# The step count taken in the current cycle is persisted so an interrupted run
+# can be resumed to the origin on the next capture.
+MOTOR_STEPS_PER_CYCLE = 8
+MOTOR_DEGREES_PER_STEP = 45.5
+MOTOR_SPEED = 20
+MOTOR_STATE_FILE = os.path.join(DATA_DIR, ".motor_state")
+
 # Mode suffixes — the only valid subdirectory names under each picture dir
 SUFFIX_GRADING = "for_grading"
 SUFFIX_TRAINING = "for_training"

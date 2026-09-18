@@ -60,6 +60,53 @@ def _mock_capture(sample_number: str, stage_number: str, trial_number: str, suff
 
 
 # ---------------------------------------------------------------------------
+# Motor position tracking — persists step count so an interrupted run can be
+# resumed to the origin on the next capture. State is a single integer in
+# cfg.MOTOR_STATE_FILE representing steps taken in the current cycle.
+# ---------------------------------------------------------------------------
+
+def _read_motor_steps() -> int:
+    try:
+        with open(cfg.MOTOR_STATE_FILE, "r", encoding="utf-8") as f:
+            return max(0, min(cfg.MOTOR_STEPS_PER_CYCLE, int(f.read().strip() or "0")))
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_motor_steps(n: int) -> None:
+    ensure_directory(os.path.dirname(cfg.MOTOR_STATE_FILE) or ".")
+    with open(cfg.MOTOR_STATE_FILE, "w", encoding="utf-8") as f:
+        f.write(str(n))
+
+
+def _rotate_motor(motor_ip: str, motor_port: int, degrees: float) -> None:
+    conn = rpyc.connect(motor_ip, port=motor_port)
+    try:
+        conn.root.run_motor_degrees(cfg.MOTOR_SPEED, degrees)
+    finally:
+        conn.close()
+
+
+def _return_motor_to_origin(motor_ip: str, motor_port: int) -> bool:
+    """If the previous run was interrupted, complete the remaining rotations
+    to bring the motor back to the origin. Idempotent when already at origin.
+    """
+    steps = _read_motor_steps()
+    if steps == 0:
+        return True
+    remaining = cfg.MOTOR_STEPS_PER_CYCLE - steps
+    log.info("Motor was at step %d/%d — returning to origin (%d rotations)",
+             steps, cfg.MOTOR_STEPS_PER_CYCLE, remaining)
+    try:
+        _rotate_motor(motor_ip, motor_port, remaining * cfg.MOTOR_DEGREES_PER_STEP)
+        _write_motor_steps(0)
+        return True
+    except Exception:
+        log.exception("Failed to return motor to origin")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Real capture — requires Basler camera + motor controller
 # ---------------------------------------------------------------------------
 
@@ -98,7 +145,10 @@ def _real_capture(sample_number: str, stage_number: str, trial_number: str, suff
         return False
 
     log.info("Connecting to motor at %s:%s", motor_ip, motor_port)
-    for i in range(1, 9):
+    if motor_ip and not _return_motor_to_origin(motor_ip, motor_port):
+        return False
+
+    for i in range(1, cfg.MOTOR_STEPS_PER_CYCLE + 1):
         cam = None
         try:
             cam = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
@@ -118,10 +168,9 @@ def _real_capture(sample_number: str, stage_number: str, trial_number: str, suff
 
         if motor_ip:
             try:
-                conn = rpyc.connect(motor_ip, port=motor_port)
-                conn.root.run_motor_degrees(20, 45.5)
-                conn.close()
-                log.debug("Motor rotated 45 deg after image %d", i)
+                _rotate_motor(motor_ip, motor_port, cfg.MOTOR_DEGREES_PER_STEP)
+                _write_motor_steps(i % cfg.MOTOR_STEPS_PER_CYCLE)
+                log.debug("Motor rotated %.1f deg after image %d", cfg.MOTOR_DEGREES_PER_STEP, i)
             except Exception:
                 log.exception("Motor control failed")
                 return False
