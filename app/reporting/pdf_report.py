@@ -12,6 +12,11 @@ DEFAULT_RUB_LEVELS: Sequence[int] = (125, 500, 1000, 2000, 5000, 7000)
 
 
 class PillingReportPDF(FPDF):
+    def __init__(self):
+        # Landscape A4 — the multi-grade table (Pilling + Matting + Fuzzing,
+        # each with 4 sub-columns) overflows portrait width.
+        super().__init__(orientation="P", unit="mm", format="A4")
+
     def header(self):
         # Logo at the top, centered
         logo_path = os.path.join("logos", "Logo_TexIQ_v1.0.jpg")
@@ -87,12 +92,11 @@ def _add_results_table(
     matting_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
     fuzzing_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
 ):
-    pdf.set_font("Arial", "", 11)
-    left_w = 55
-    res_w = 25
-    row_h = 8
+    left_w = 20
+    res_w = 12
+    row_h = 7
     pdf.set_fill_color(220, 220, 220)
-    pdf.set_font("Arial", "B", 10)
+    pdf.set_font("Arial", "B", 8)
 
     grade_sections = [("Pilling", results_by_rubs)]
     if matting_by_rubs is not None:
@@ -103,8 +107,14 @@ def _add_results_table(
     n_sections = len(grade_sections)
     section_w = res_w * 4
 
-    # Header row 1: grade labels
-    pdf.cell(left_w, row_h * 2, "Number of rubs", border=1, align="C", fill=True)
+    # Header row 1: two-line first-col header + grade labels
+    x0, y0 = pdf.get_x(), pdf.get_y()
+    pdf.cell(left_w, row_h * 2, "", border=1, fill=True)  # border + fill only
+    pdf.set_xy(x0, y0 + row_h * 0.15)
+    pdf.cell(left_w, row_h * 0.85, "Number", border=0, align="C")
+    pdf.set_xy(x0, y0 + row_h)
+    pdf.cell(left_w, row_h * 0.85, "of rubs", border=0, align="C")
+    pdf.set_xy(x0 + left_w, y0)
     for label, _ in grade_sections:
         pdf.cell(section_w, row_h, label, border=1, align="C", fill=True)
     pdf.ln(row_h)
@@ -112,11 +122,11 @@ def _add_results_table(
     # Header row 2: sub-columns
     pdf.set_x(pdf.l_margin + left_w)
     for _ in range(n_sections):
-        for sub in ("Result 1", "Result 2", "Result 3", "Average"):
+        for sub in ("Trial 1", "Trial 2", "Trial 3", "Avg."):
             pdf.cell(res_w, row_h, sub, border=1, align="C", fill=True)
     pdf.ln(row_h)
 
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Arial", "", 8)
     for rub in rub_levels:
         pdf.cell(left_w, row_h, f"{rub} rev.", border=1, align="L")
         for _, rub_data in grade_sections:
