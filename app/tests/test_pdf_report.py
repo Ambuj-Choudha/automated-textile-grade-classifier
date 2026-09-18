@@ -284,7 +284,7 @@ def test_generate_pilling_report_trial_scenarios(tmp_path, scenario_id, scenario
     time.sleep(0.2)  # Windows filesystem settle
     text = _read_pdf_text(str(out_file))
 
-    assert "Pilling Test Report" in text
+    assert "Test Report" in text
     assert f"Sample Number: {scenario['sample_number']}" in text
     assert f"Operator Name: {scenario['operator']}" in text
     for rub in scenario["rub_levels"]:

@@ -29,7 +29,7 @@ class PillingReportPDF(FPDF):
             
         # Title: centered, bold
         self.set_font("Arial", "B", 16)
-        self.cell(0, 10, "Pilling Test Report", ln=True, align="C")
+        self.cell(0, 10, "Test Report", ln=True, align="C")
 
     def footer(self):
         self.set_y(-15)
@@ -39,7 +39,7 @@ class PillingReportPDF(FPDF):
 def _add_statement(pdf: PillingReportPDF):
     pdf.ln(2)
     pdf.set_font("Arial", "", 11)
-    pdf.multi_cell(0, 7, "Pilling test has been conducted according to ISO-12945-2 standards")
+    pdf.multi_cell(0, 7, "Testing has been conducted according to ISO-12945-2 standards")
     pdf.ln(2)
 
 def _add_details(
