@@ -1,3 +1,4 @@
+import logging
 import os
 import csv
 import tempfile
@@ -9,6 +10,8 @@ import cv2
 from app.helpers.utils import ensure_directory
 from itanet_recall import predict_from_csv
 from app.settings import config as cfg
+
+log = logging.getLogger(__name__)
 
 # Try to import TensorFlow if installed; do not fail if missing
 try:
@@ -89,7 +92,7 @@ def _process_difference_images(diff_dir: str, sample_number: str, stage_number: 
         diff_path = os.path.join(diff_dir, diff_filename)
         stats_result = _calculate_image_stats(diff_path)
         if stats_result is None:
-            print(f"[WARN] Could not read image: {diff_path}")
+            log.warning("Could not read image: %s", diff_path)
             continue
         mean_val, std_val, max_val, mode_val = stats_result
         if grade_number is not None:
@@ -130,7 +133,7 @@ def _coerce_grade(grade_number: Union[str, float, None], label: str) -> Optional
         g = float(str(grade_number).replace(",", "."))
         return round(g * 2) / 2.0
     except ValueError:
-        print(f"[ERR] Invalid {label}: {grade_number}")
+        log.error("Invalid %s: %s", label, grade_number)
         return None
 
 
@@ -176,12 +179,12 @@ def _predict_grade_from_features(grade: str, sample_key: str, mean_avg: float, s
             row = next(csv.DictReader(f), None)
 
         if not row or "Predicted_Grade" not in row:
-            print(f"[ERR] No predicted grade in predictions CSV for {grade}.")
+            log.error("No predicted grade in predictions CSV for %s", grade)
             return None
         return float(row["Predicted_Grade"].strip())
 
-    except Exception as e:
-        print(f"[ERR] Prediction failed for grade={grade}: {e}")
+    except Exception:
+        log.exception("Prediction failed for grade=%s", grade)
         return None
     finally:
         _safe_unlink(temp_csv)
@@ -213,17 +216,17 @@ def analyze_difference_images_and_predict_output(
         ensure_directory(output_dir)
 
         if not os.path.exists(diff_dir):
-            print(f"[ERR] Difference pictures directory not found: {diff_dir}")
+            log.error("Difference pictures directory not found: %s", diff_dir)
             return None
 
         all_stats = _process_difference_images(diff_dir, sample_number, stage_number, trial_number)
         if not all_stats:
-            print("[WARN] No valid images found for analysis.")
+            log.warning("No valid images found for analysis")
             return None
 
         mean_avg, std_avg, max_avg, mode_avg = _calculate_feature_averages(all_stats)
         if any(x is None or (isinstance(x, float) and np.isnan(x)) for x in (mean_avg, std_avg, max_avg, mode_avg)):
-            print("[WARN] Invalid averaged features.")
+            log.warning("Invalid averaged features")
             return None
 
         sample_key = f"{sample_number}-{stage_number}-{trial_number}"
@@ -241,7 +244,7 @@ def analyze_difference_images_and_predict_output(
                 "fuzzing": round(min(5.0, mock_base + 0.5) * 2) / 2.0,
             }
             grades: Dict[str, Optional[float]] = {g: all_mock[g] for g in active_grades if g in all_mock}
-            print(f"[MOCK] Predicted grades: {grades}")
+            log.info("mock predicted grades: %s", grades)
         else:
             grades = {}
             for grade in active_grades:
@@ -264,13 +267,13 @@ def analyze_difference_images_and_predict_output(
                 f"{sample_number}-{stage_number}-{trial_number}-{grade}-analysis.csv",
             )
             _write_csv_with_headers(analysis_csv, list(FEATURE_HEADERS), rows_for_csv)
-            print(f"[OK] Analysis saved: {analysis_csv}")
+            log.info("Analysis saved: %s", analysis_csv)
 
         # Filter out None predictions before returning
         return {g: v for g, v in grades.items() if v is not None} or None
 
-    except Exception as e:
-        print(f"[ERR] analyze_difference_images_and_predict_output failed: {e}")
+    except Exception:
+        log.exception("analyze_difference_images_and_predict_output failed")
         return None
 
 
@@ -293,21 +296,21 @@ def analyze_difference_images(
     if output_dir is None:
         output_dir = cfg.TRAINING_FEATURES_DIR
     if not grades:
-        print("[ERR] No grades provided.")
+        log.error("No grades provided")
         return
     try:
         diff_dir = cfg.get_difference_dir(cfg.SUFFIX_TRAINING)
         ensure_directory(output_dir)
 
         if not os.path.exists(diff_dir):
-            print(f"[ERR] Difference pictures directory not found: {diff_dir}")
+            log.error("Difference pictures directory not found: %s", diff_dir)
             return
 
         # Feature extraction is the same for all grades — compute once
         first_grade_val = next(iter(grades.values()))
         all_stats = _process_difference_images(diff_dir, sample_number, stage_number, trial_number, first_grade_val)
         if not all_stats:
-            print("[WARN] No valid images found for analysis.")
+            log.warning("No valid images found for analysis")
             return
 
         mean_avg, std_avg, max_avg, mode_avg = _calculate_feature_averages(all_stats)
@@ -319,14 +322,14 @@ def analyze_difference_images(
             out_avg = os.path.join(output_dir, f"{prefix}_averaged_features.csv")
             _write_csv_with_headers(out_per, TRAIN_HEADERS, per_image_rows, append_mode=True)
             _write_csv_with_headers(out_avg, TRAIN_HEADERS, avg_row, append_mode=True)
-            print(f"[OK] {prefix} training rows appended to {out_per} and {out_avg}")
+            log.info("%s training rows appended to %s and %s", prefix, out_per, out_avg)
 
         for grade_name, grade_val in grades.items():
             rows = _restamp_grade(all_stats, grade_val)
             _write_grade_csvs(grade_name, rows, grade_val)
 
-    except Exception as e:
-        print(f"[ERR] analyze_difference_images failed: {e}")
+    except Exception:
+        log.exception("analyze_difference_images failed")
 
 
 def batch_predict_from_csv(csv_path: str, output_path: Optional[str] = None, custom_net_file: Optional[str] = None, custom_trn_file: Optional[str] = None) -> str:

@@ -1,7 +1,10 @@
+import logging
 import os
 import pathlib
 from typing import List
 from app.settings import config as cfg
+
+log = logging.getLogger(__name__)
 
 # Ensures that the specified directory exists; creates it if it doesn't.
 def ensure_directory(target_folder: str | os.PathLike, recursive: bool = True) -> bool:
@@ -9,15 +12,15 @@ def ensure_directory(target_folder: str | os.PathLike, recursive: bool = True) -
         target_path = pathlib.Path(target_folder)
         if (target_path.exists()):
             return True
-        
+
         target_path.mkdir(parents=recursive, exist_ok=True)
-        print(f"Created directory: {target_folder}")
+        log.debug("Created directory: %s", target_folder)
         return True
     except OSError as e:
-        print(f"Failed to create directory {target_folder}: {e}")
+        log.error("Failed to create directory %s: %s", target_folder, e)
         return False
-    except Exception as e:
-        print(f"Unexpected error creating directory {target_folder}: {e}")
+    except Exception:
+        log.exception("Unexpected error creating directory %s", target_folder)
         return False
 
 # Validates that the input sample and stage number is alphanumeric.
@@ -48,8 +51,8 @@ def get_available_samples(suffix: str) -> List[str]:
                 if sample:
                     samples.add(sample)
         return sorted(samples)
-    except Exception as e:
-        print(f"Error getting available samples: {e}")
+    except Exception:
+        log.exception("get_available_samples failed")
         return []
 
 # Helper function to check if image exists and add to status
@@ -84,8 +87,8 @@ def check_required_images(sample_number: str, stage_number: str, trial_number: s
 
         return status
 
-    except Exception as e:
-        print(f"Error checking required images: {e}")
+    except Exception:
+        log.exception("check_required_images failed")
         return {
             'all_input_present': False,
             'all_difference_present': False,

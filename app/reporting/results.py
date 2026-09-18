@@ -1,8 +1,11 @@
+import logging
 import os
 import re
 import pandas as pd
 from app.reporting.pdf_report import generate_pilling_report
 from app.helpers.utils import ensure_directory
+
+log = logging.getLogger(__name__)
 
 
 def _process_csv_data(df_full: pd.DataFrame) -> tuple:
@@ -50,8 +53,8 @@ def _scan_stage_results_for_sample(sample_number: str) -> dict[int, list[str]]:
         for stage_rubs in results:
             results[stage_rubs].sort()
         return dict(sorted(results.items()))
-    except Exception as e:
-        print(f"Error scanning stage results for sample {sample_number}: {e}")
+    except Exception:
+        log.exception("Error scanning stage results for sample %s", sample_number)
         return {}
 
 
@@ -71,7 +74,7 @@ def export_results(
     try:
         stage_trials_map = _scan_stage_results_for_sample(sample_number)
         if not stage_trials_map:
-            print(f"No analysis CSVs found for sample {sample_number} in output/grading_results/")
+            log.warning("No analysis CSVs found for sample %s in output/grading_results/", sample_number)
             return False
 
         results_by_rubs = {}
@@ -114,11 +117,11 @@ def export_results(
         )
 
         if ok:
-            print(f"PDF report saved to: {pdf_filepath}")
+            log.info("PDF report saved to: %s", pdf_filepath)
             return True
-        print("Error during PDF export: failed to generate PDF.")
+        log.error("PDF export: generate_pilling_report returned False")
         return False
 
-    except Exception as e:
-        print(f"Error during PDF export: {e}")
+    except Exception:
+        log.exception("Error during PDF export")
         return False

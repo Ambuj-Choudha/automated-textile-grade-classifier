@@ -1,9 +1,11 @@
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Sequence, Optional
 from fpdf import FPDF
-import traceback
 from app.settings import config as cfg
+
+log = logging.getLogger(__name__)
 
 # Public default rub levels used in the table
 DEFAULT_RUB_LEVELS: Sequence[int] = (125, 500, 1000, 2000, 5000, 7000)
@@ -210,9 +212,8 @@ def generate_pilling_report(
         _ensure_parent_dir(output_path)
         pdf.output(output_path)
         return True
-    except Exception as e:
-        print(f"PDF generation error: {e}")
-        traceback.print_exc()
+    except Exception:
+        log.exception("PDF generation error")
         return False
 
 def _ensure_parent_dir(path: str) -> None:

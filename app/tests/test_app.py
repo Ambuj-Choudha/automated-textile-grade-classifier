@@ -346,6 +346,15 @@ def _import_app_module():
     app_path = Path(__file__).parent.parent.parent / "app.py"
     if not app_path.exists():
         pytest.skip(f"app.py not found at {app_path}")
+
+    # Purge cached app.* modules so each test's fake streamlit is captured
+    # freshly by their module-level `import streamlit as st`. We only purge
+    # UI/orchestration modules — the fake sub-modules (app.settings.config
+    # etc.) are re-installed by the fixture before every test.
+    for name in list(sys.modules):
+        if name in ("app.state", "app.pipeline", "app.callbacks") or name.startswith("app.ui"):
+            del sys.modules[name]
+
     spec = importlib.util.spec_from_file_location("app", str(app_path))
     module = importlib.util.module_from_spec(spec)
     try:
@@ -408,22 +417,24 @@ def test_create_and_capture_actions_call_impls(prepared_env):
 
 def test_capture_images_action_handles_exception(prepared_env, monkeypatch):
     app = _import_app_module()
+    from app import pipeline
 
     def _raise(*args, **kwargs):
         raise RuntimeError("camera failure")
 
-    monkeypatch.setattr(app, "capture_sample_images", _raise)
+    monkeypatch.setattr(pipeline, "capture_sample_images", _raise)
     result = app.capture_images_action("003", "3", "1", "for_grading", "127.0.0.1", 18812)
     assert result is False
 
 
 def test_create_difference_action_handles_exception(prepared_env, monkeypatch):
     app = _import_app_module()
+    from app import pipeline
 
     def _raise(*args, **kwargs):
         raise RuntimeError("diff failure")
 
-    monkeypatch.setattr(app, "create_difference_images", _raise)
+    monkeypatch.setattr(pipeline, "create_difference_images", _raise)
     result = app.create_difference_action("003", "3", "1", "for_grading", "0")
     assert result is False
 
@@ -709,12 +720,13 @@ def test_capture_grading_with_stage0_file_runs_full_pipeline(prepared_env):
 def test_capture_grading_exception_sets_error(prepared_env, monkeypatch):
     """Exception in capture propagates as a capture_error message."""
     app = _import_app_module()
+    from app import pipeline
     st = prepared_env["st"]
 
     def _raise(*args, **kwargs):
         raise RuntimeError("hardware fault")
 
-    monkeypatch.setattr(app, "capture_images_action", _raise)
+    monkeypatch.setattr(pipeline, "capture_images_action", _raise)
     app.capture_callback("grading", _grading_params(stage="0"))
     assert st.session_state.get("capture_error") is not None
     assert "Unexpected error" in st.session_state["capture_error"]
