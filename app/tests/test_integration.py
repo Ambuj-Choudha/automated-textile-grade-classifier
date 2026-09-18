@@ -64,12 +64,12 @@ def _read_predictions(csv_path: str) -> list[float]:
 def _run_recall(csv_path: str, output_path: str) -> list[float]:
     predict_from_csv(
         csv_path=csv_path,
-        data_dir=cfg.ITANET_RUN_DIR,
+        data_dir=cfg.get_itanet_run_dir("pilling"),
         dll_path=cfg.DLL_PATH,
         output_path=output_path,
         feature_cols=cfg.FEATURE_COLUMNS,
         clip_range=cfg.CLIP_RANGE,
-        fls_dir=cfg.ITANET_FLS_DIR,
+        fls_dir=cfg.get_itanet_fls_dir("pilling"),
     )
     return _read_predictions(output_path)
 
@@ -243,7 +243,7 @@ def _ensure_prereqs(rep: Reporter) -> bool:
     else:
         rep.check("DLL present", True, cfg.DLL_PATH)
 
-    net = Path(cfg.ITANET_RUN_DIR) / "Neuronalesnetz.NET"
+    net = Path(cfg.get_itanet_run_dir("pilling")) / "Neuronalesnetz.NET"
     if not net.exists():
         rep.check("trained .NET present", False, str(net))
         ok = False

@@ -1,3 +1,8 @@
+"""Unit tests for app.py callbacks and actions.
+
+All Streamlit, config, camera, and analysis dependencies are stubbed so tests
+run without hardware, trained models, or a real Streamlit server.
+"""
 import os
 import sys
 import csv
@@ -8,10 +13,12 @@ import pytest
 import importlib
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _install_at(monkeypatch, dotted_path: str, mod) -> None:
-    """Install fake mod at sys.modules[dotted_path] and bind it on its parent package
-    so `from <parent> import <leaf>` resolves to the fake during import of app.py.
-    """
+    """Install fake mod at sys.modules[dotted_path] and bind it on its parent."""
     monkeypatch.setitem(sys.modules, dotted_path, mod)
     if "." in dotted_path:
         parent_path, child_name = dotted_path.rsplit(".", 1)
@@ -19,32 +26,30 @@ def _install_at(monkeypatch, dotted_path: str, mod) -> None:
         if parent is None:
             parent = types.ModuleType(parent_path)
             monkeypatch.setitem(sys.modules, parent_path, parent)
-        setattr(parent, child_name, mod)
+        monkeypatch.setattr(parent, child_name, mod, raising=False)
+
+
+# ---------------------------------------------------------------------------
+# Stub factories
+# ---------------------------------------------------------------------------
 
 def _install_dummy_streamlit(monkeypatch):
     class _DummyCtx:
         def __enter__(self): return self
-        def __exit__(self, exc_type, exc, tb): return False
+        def __exit__(self, *_): return False
 
-    # session state with both .attr and ['key'] access
     class _Sess(dict):
         def __getattr__(self, k):
-            try:
-                return self[k]
-            except KeyError:
-                raise AttributeError(k)
-        def __setattr__(self, k, v):
-            self[k] = v
-        def pop(self, k, default=None):
-            return dict.pop(self, k, default)
-        def get(self, k, default=None):
-            return dict.get(self, k, default)
+            try: return self[k]
+            except KeyError: raise AttributeError(k)
+        def __setattr__(self, k, v): self[k] = v
+        def pop(self, k, default=None): return dict.pop(self, k, default)
+        def get(self, k, default=None): return dict.get(self, k, default)
 
     class _CacheData:
         def clear(self): pass
         def __call__(self, *args, **kwargs):
-            def decorator(func):
-                return func
+            def decorator(func): return func
             return decorator
 
     class DummyStreamlit:
@@ -55,32 +60,19 @@ def _install_dummy_streamlit(monkeypatch):
             self._last_metrics = []
             self.cache_data = _CacheData()
 
-        # act as context manager (for "with st.sidebar:" and "with col1:")
         def __enter__(self): return self
-        def __exit__(self, exc_type, exc, tb): return False
+        def __exit__(self, *_): return False
 
-        # context helpers
         def expander(self, *a, **k): return _DummyCtx()
         def container(self): return _DummyCtx()
         def spinner(self, *a, **k): return _DummyCtx()
-        def empty(self): return _DummyCtx()  # Add empty() method
-        def rerun(self): pass  # Add rerun() method
+        def empty(self): return _DummyCtx()
+        def rerun(self): pass
 
-        # layout
         def columns(self, spec):
-            if isinstance(spec, int):
-                n = spec
-            else:
-                try:
-                    n = len(spec)
-                except TypeError:
-                    try:
-                        n = int(spec)
-                    except Exception:
-                        n = 1
+            n = spec if isinstance(spec, int) else len(list(spec))
             return [self for _ in range(n)]
 
-        # UI stubs
         def set_page_config(self, *a, **k): pass
         def markdown(self, *a, **k): pass
         def header(self, *a, **k): pass
@@ -93,24 +85,21 @@ def _install_dummy_streamlit(monkeypatch):
         def warning(self, *a, **k): pass
         def metric(self, *a, **k): self._last_metrics.append((a, k))
 
-        # inputs
         def selectbox(self, label, options, index=0, **k):
-            if not options:
-                return None
-            if index < 0 or index >= len(options):
-                index = 0
+            if not options: return None
+            if not (0 <= index < len(options)): index = 0
             return options[index]
+
+        def multiselect(self, label, options, default=None, **k):
+            return list(default) if default is not None else list(options)
+
         def text_input(self, label, value="", **k): return value
         def number_input(self, label, value=0, **k): return value
-        def button(self, label, **k): 
-            # Handle on_click callback if present
-            if 'on_click' in k and k.get('key') == 'btn_capture_grading':
-                return True  # Simulate button press for testing
-            return self._button_defaults.get(label, False)
+        def button(self, label, **k): return self._button_defaults.get(label, False)
 
-        # sidebar passthroughs
         def __getattr__(self, name):
-            return getattr(self, name)
+            # Catch-all so sidebar.X delegates to self.X
+            return object.__getattribute__(self, name)
 
     dummy = DummyStreamlit()
     m = types.ModuleType("streamlit")
@@ -122,10 +111,11 @@ def _install_dummy_streamlit(monkeypatch):
 
 
 def _install_dummy_translations(monkeypatch):
-    m = types.ModuleType("translations")
-    m.translations = {
+    _trans = {
         "en": {
             "settings": "Settings",
+            "select_grades": "Active Grades",
+            "grades_required": "Select at least one grade",
             "motor_settings": "Motor settings",
             "motor_ip": "Motor IP",
             "motor_port": "Motor Port",
@@ -136,23 +126,33 @@ def _install_dummy_translations(monkeypatch):
             "enter_filename": "Enter filename",
             "invalid_picture_name": "Invalid picture name",
             "title_grading": "Grading",
+            "title_training": "Training",
             "available_samples": "Available samples",
             "sample_number": "Sample",
             "stage_number": "Stage",
+            "trial_number": "Trial",
             "load_weight": "Load",
+            "grade_number": "Pilling Grade",
+            "matting_grade_number": "Matting Grade",
+            "fuzzing_grade_number": "Fuzzing Grade",
+            "pilling_grade_result": "Pilling Grade",
+            "matting_grade_result": "Matting Grade",
+            "fuzzing_grade_result": "Fuzzing Grade",
             "invalid_sample": "Invalid sample",
             "invalid_stage": "Invalid stage",
+            "invalid_trial": "Invalid trial",
             "invalid_load": "Invalid load",
+            "invalid_grade": "Invalid grade",
+            "invalid_matting_grade": "Invalid matting grade",
+            "invalid_fuzzing_grade": "Invalid fuzzing grade",
             "valid_input": "Valid input",
             "capture_button": "Capture Images",
+            "capture_button_training": "Capture Images (Training)",
             "results": "Results",
             "export_results": "Export Results",
             "reset_button": "Reset",
+            "reset_grade": "Reset Grade",
             "status": "Status",
-            "title_training": "Training",
-            "grade_number": "Grade",
-            "invalid_grade": "Invalid grade",
-            "capture_button_training": "Capture Images (Training)",
             "mode_selector": "Mode",
             "training_mode": "Training Mode",
             "grading_mode": "Grading Mode",
@@ -160,7 +160,7 @@ def _install_dummy_translations(monkeypatch):
             "password_prompt": "Password",
             "submit": "Submit",
             "operator_prompt": "Operator Name",
-            "histogram_fail": "No analysis results to display",
+            "histogram_fail": "Analysis failed",
             "reference_not_found": "Reference image not found",
             "image_capture_spinner": "Capturing images...",
             "image_capture_fail": "Image capture failed",
@@ -169,11 +169,18 @@ def _install_dummy_translations(monkeypatch):
             "diff_create_success": "Difference images created",
             "diff_create_fail": "Failed to create difference images",
             "histogram_spinner": "Analyzing histograms...",
-            "histogram_success": "Analysis complete. Grade:",
+            "histogram_success": "Analysis complete",
             "login_error": "Invalid password",
             "name_required": "Name is required",
         }
     }
+
+    def t(key: str) -> str:
+        return _trans["en"].get(key, key)
+
+    m = types.ModuleType("app.reporting.translations")
+    m.t = t
+    m.translations = _trans
     _install_at(monkeypatch, "app.reporting.translations", m)
     return m
 
@@ -182,23 +189,19 @@ def _install_dummy_utils(monkeypatch):
     m = types.ModuleType("utils")
 
     def validate_input_number(x: str) -> bool:
-        try:
-            int(x)
-            return True
-        except Exception:
-            return False
+        return bool(x and x.strip().isalnum())
 
     def validate_grade(x: str) -> bool:
+        if not x:
+            return False
         try:
-            float(x)
-            return True
-        except Exception:
+            return float(x) in {1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}
+        except ValueError:
             return False
 
     def get_available_samples(mode: str):
         return [f"{i:03d}" for i in range(1, 6)]
 
-    # Updated to accept trial_number parameter
     def check_required_images(sample_number, stage_number, trial_number, suffix):
         return {
             "present_input_images": [],
@@ -220,13 +223,18 @@ def _install_dummy_utils(monkeypatch):
     m.ensure_directory = ensure_directory
     m.export_results = export_results
     _install_at(monkeypatch, "app.helpers.utils", m)
+
+    # app.py now imports export_results from app.reporting.results — stub it too
+    results_m = types.ModuleType("app.reporting.results")
+    results_m.export_results = export_results
+    _install_at(monkeypatch, "app.reporting.results", results_m)
+
     return m
 
 
 def _install_dummy_camera_and_diff(monkeypatch):
     cam = types.ModuleType("camera_control")
 
-    # Updated to accept trial_number parameter
     def capture_sample_images(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port):
         return True
 
@@ -235,7 +243,6 @@ def _install_dummy_camera_and_diff(monkeypatch):
 
     diff = types.ModuleType("image_difference")
 
-    # Updated to accept trial_number parameter
     def create_difference_images(sample_number, stage_number, trial_number, suffix, reference_stage):
         return True
 
@@ -246,9 +253,14 @@ def _install_dummy_camera_and_diff(monkeypatch):
 
 def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg = types.ModuleType("config")
-    cfg.BASE_DIR = str(tmp_path)
-    cfg.DLL_PATH = str(tmp_path / "itanet" / "itanet.dll")
+    cfg.GRADES = ("pilling", "matting", "fuzzing")
+    cfg.SUFFIX_GRADING = "for_grading"
+    cfg.SUFFIX_TRAINING = "for_training"
     cfg.BACKEND = "itanet_dll"
+    cfg.MOCK_PREDICTION = True
+    cfg.MOCK_HARDWARE = True
+    cfg.ADMIN_PASSWORD = "1234"
+    cfg.DLL_PATH = str(tmp_path / "itanet" / "itanet.dll")
     cfg.TF_MODEL_PATH = str(tmp_path / "my_model.h5")
     cfg.FEATURE_COLUMNS = ("Mean", "Std", "Max", "Mode")
     cfg.DECIMAL = "point"
@@ -256,9 +268,15 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg.CLIP_RANGE = (1.0, 5.0)
     cfg.CUSTOM_NET = None
     cfg.CUSTOM_TRN = None
+    cfg.GRADING_RESULTS_DIR = str(tmp_path / "output" / "grading_results")
+    cfg.TRAINING_FEATURES_DIR = str(tmp_path / "data" / "training_features")
     cfg.get_itanet_run_dir = lambda grade: str(tmp_path / "itanet" / grade / "run")
     cfg.get_itanet_fls_dir = lambda grade: str(tmp_path / "itanet" / grade / "data")
     cfg.get_itanet_archive_dir = lambda grade: str(tmp_path / "itanet" / "archive" / grade)
+    cfg.get_input_dir = lambda suffix: str(tmp_path / "input_pictures" / suffix)
+    cfg.get_difference_dir = lambda suffix: str(tmp_path / "difference_pictures" / suffix)
+    cfg.make_input_filename = lambda s, st, tr, pos: f"{s}-{st}-{tr}-{pos}.png"
+    cfg.make_difference_filename = lambda s, st, tr, pos: f"{s}-{st}-{tr}-{pos}-dif.png"
     for grade in ("pilling", "matting", "fuzzing"):
         os.makedirs(cfg.get_itanet_run_dir(grade), exist_ok=True)
         os.makedirs(cfg.get_itanet_fls_dir(grade), exist_ok=True)
@@ -269,86 +287,47 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
 def _install_dummy_itanet(monkeypatch, tmp_path: Path):
     itanet = types.ModuleType("itanet_recall")
 
-    def prepare_and_recall_csv(csv_path: str, itanet_data_dir: str, dll_path: str, output_csv: str, feature_cols, decimal="point", seed=None, custom_net_file=None, custom_trn_file=None):
-        # Minimal CSV-only recall stub: copies CSV and adds constant prediction
-        out_path = output_csv
+    def predict_from_csv(csv_path, data_dir, dll_path, output_path, feature_cols,
+                         clip_range=None, fls_dir=None, **kw):
         rows = []
         with open(csv_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
+            for row in csv.DictReader(f):
                 row = dict(row)
                 row["Predicted_Grade"] = "3.0"
                 rows.append(row)
         fieldnames = list(rows[0].keys()) if rows else list(feature_cols) + ["Predicted_Grade"]
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        with open(out_path, "w", newline="") as f:
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(output_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            for r in rows:
-                writer.writerow(r)
-        return out_path
+            writer.writerows(rows)
+        return output_path
 
-    itanet.prepare_and_recall_csv = prepare_and_recall_csv
+    itanet.predict_from_csv = predict_from_csv
     _install_at(monkeypatch, "itanet_recall", itanet)
     return itanet
 
 
 def _install_dummy_histogram_analysis(monkeypatch, tmp_path: Path):
     ha = types.ModuleType("histogram_analysis")
-
-    # Updated to accept trial_number parameter
-    def analyze_difference_images_and_predict_output(sample_number: str, stage_number: str, trial_number: str, output_dir: str = os.path.join("output", "grading_results")):
-        # Create a simple analysis CSV with trial_number in filename
-        analysis_dir = tmp_path / output_dir
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-        analysis_csv = analysis_dir / f"{sample_number}-{stage_number}-{trial_number}-analysis.csv"
-        
-        # Write dummy analysis data
-        with open(analysis_csv, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Image", "Mean", "Std", "Max", "Mode"])
-            for i in range(1, 9):
-                writer.writerow([f"{sample_number}-{stage_number}-{trial_number}-{i}-dif.png", 100, 10, 255, 80])
-            writer.writerow(["Average", 100, 10, 255, 80])
-            writer.writerow(["Grade", 3.0, "", "", ""])
-            writer.writerow(["Backend", "itanet_dll", "", "", ""])
-        
-        return 3.0
-
     _train_called = {"called": False, "args": None}
 
-    # Updated to accept trial_number parameter
-    def analyze_difference_images(sample_number: str, stage_number: str, trial_number: str, grade_number, output_dir: str = os.path.join("data", "training_features")):
-        _train_called["called"] = True
-        _train_called["args"] = (sample_number, stage_number, trial_number, grade_number, output_dir)
-        return True
+    def analyze_difference_images_and_predict_output(
+        sample_number, stage_number, trial_number,
+        selected_grades=None, output_dir=None,
+    ):
+        return {"pilling": 3.0}
 
-    def batch_predict_from_csv(csv_path: str, output_path: str | None = None, custom_net_file: str | None = None, custom_trn_file: str | None = None) -> str:
-        if output_path is None:
-            output_path = str(Path(csv_path).with_name("predictions.csv"))
-        
-        # Create dummy predictions
-        rows = []
-        with open(csv_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                row = dict(row)
-                row["Predicted_Grade"] = "3.0"
-                rows.append(row)
-        
-        with open(output_path, "w", newline="") as f:
-            if rows:
-                writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-                writer.writeheader()
-                writer.writerows(rows)
-        
-        return output_path
+    def analyze_difference_images(
+        sample_number, stage_number, trial_number,
+        grades=None, output_dir=None,
+    ):
+        _train_called["called"] = True
+        _train_called["args"] = (sample_number, stage_number, trial_number)
 
     ha.analyze_difference_images_and_predict_output = analyze_difference_images_and_predict_output
     ha.analyze_difference_images = analyze_difference_images
-    ha.batch_predict_from_csv = batch_predict_from_csv
     ha._train_called = _train_called
-
     _install_at(monkeypatch, "app.analysis.histogram_analysis", ha)
     return ha
 
@@ -363,20 +342,24 @@ def _install_dummy_pil(monkeypatch):
 
 
 def _import_app_module():
-    # Try to import the real app.py from the current directory
-    app_path = Path(__file__).parent.parent / "app.py"
+    # app.py lives at project root — two levels above this test file's package
+    app_path = Path(__file__).parent.parent.parent / "app.py"
     if not app_path.exists():
-        pytest.skip("app.py not found in expected location")
+        pytest.skip(f"app.py not found at {app_path}")
     spec = importlib.util.spec_from_file_location("app", str(app_path))
     module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+        spec.loader.exec_module(module)
     except SyntaxError as e:
-        pytest.skip(f"app.py has syntax errors preventing import: {e}")
+        pytest.skip(f"app.py has syntax errors: {e}")
     except Exception as e:
         pytest.skip(f"app.py could not be imported: {e}")
     return module
 
+
+# ---------------------------------------------------------------------------
+# Shared fixture
+# ---------------------------------------------------------------------------
 
 @pytest.fixture()
 def prepared_env(monkeypatch, tmp_path):
@@ -392,403 +375,402 @@ def prepared_env(monkeypatch, tmp_path):
     return {"st": st, "cfg": cfg, "itanet": itanet, "ha": ha, "tmp": tmp_path}
 
 
-def test_analyze_histograms_action_uses_itanet_backend(prepared_env):
+# ---------------------------------------------------------------------------
+# Core action tests
+# ---------------------------------------------------------------------------
+
+def test_run_grading_analysis_returns_grade_dict(prepared_env):
     app = _import_app_module()
-    # Updated to include trial_number parameter
-    grade = app.analyze_histograms_action("00001", "1", "1", 0)
-    assert grade == pytest.approx(3.0), "Expected ITANET dummy to return grade 3.0"
+    grades = app.run_grading_analysis("00001", "1", "1")
+    assert isinstance(grades, dict)
+    assert "pilling" in grades
+    assert grades["pilling"] == pytest.approx(3.0)
+
+
+def test_run_grading_analysis_selected_grades_forwarded(prepared_env):
+    app = _import_app_module()
+    grades = app.run_grading_analysis("00001", "1", "1", selected_grades=["pilling"])
+    assert isinstance(grades, dict)
 
 
 def test_training_path_calls_analyze_difference_images(prepared_env):
     app = _import_app_module()
-    # Updated to include trial_number parameter
-    _ = app.analyze_histograms_action("002", "2", "1", 2.5)
+    app.run_training_analysis("002", "2", "1", {"pilling": 2.5})
     assert prepared_env["ha"]._train_called["called"] is True
-    assert prepared_env["ha"]._train_called["args"][:4] == ("002", "2", "1", 2.5)
+    assert prepared_env["ha"]._train_called["args"][:3] == ("002", "2", "1")
 
 
 def test_create_and_capture_actions_call_impls(prepared_env):
     app = _import_app_module()
-    # Updated to include trial_number parameter
     assert app.create_difference_action("003", "3", "1", "for_grading", "0") is True
     assert app.capture_images_action("003", "3", "1", "for_grading", "127.0.0.1", 18812) is True
 
 
+def test_capture_images_action_handles_exception(prepared_env, monkeypatch):
+    app = _import_app_module()
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("camera failure")
+
+    monkeypatch.setattr(app, "capture_sample_images", _raise)
+    result = app.capture_images_action("003", "3", "1", "for_grading", "127.0.0.1", 18812)
+    assert result is False
+
+
+def test_create_difference_action_handles_exception(prepared_env, monkeypatch):
+    app = _import_app_module()
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("diff failure")
+
+    monkeypatch.setattr(app, "create_difference_images", _raise)
+    result = app.create_difference_action("003", "3", "1", "for_grading", "0")
+    assert result is False
+
+
 def test_display_operation_status_does_not_crash(prepared_env):
     app = _import_app_module()
-    # Updated to include trial_number parameter
     app.display_operation_status("004", "4", "1", "for_grading")
+
+
+# ---------------------------------------------------------------------------
+# display_grades
+# ---------------------------------------------------------------------------
+
+def test_display_grades_with_dict(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["selected_grades"] = ["pilling"]
+    app.display_grades({"pilling": 3.5}, "00001", "1")
+
+
+def test_display_grades_with_all_three_grades(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["selected_grades"] = ["pilling", "matting", "fuzzing"]
+    app.display_grades({"pilling": 3.0, "matting": 2.5, "fuzzing": 3.5}, "00001", "1")
+
+
+def test_display_grades_with_none(prepared_env):
+    app = _import_app_module()
+    app.display_grades(None, "00001", "1")
+
+
+def test_display_grades_empty_dict(prepared_env):
+    app = _import_app_module()
+    app.display_grades({}, "00001", "1")
+
+
+# ---------------------------------------------------------------------------
+# main() smoke tests
+# ---------------------------------------------------------------------------
+
+def test_main_runs_mode_selector(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["mode"] = None
+    app.main()
 
 
 def test_main_runs_in_grading_mode(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    # Simulate user already chose grading mode; just ensure it runs
     st.session_state["mode"] = "grading"
     st.session_state["operator_name"] = "Test Operator"
     app.main()
 
 
-def test_navigation_callbacks(prepared_env):
+def test_main_runs_in_training_mode(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Test navigation to training
+    st.session_state["mode"] = "training"
+    app.main()
+
+
+def test_main_runs_training_login_screen(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["mode"] = "training_requested"
+    app.main()
+
+
+def test_main_runs_operator_name_screen(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["mode"] = "grading_requested"
+    app.main()
+
+
+# ---------------------------------------------------------------------------
+# Navigation / state callbacks
+# ---------------------------------------------------------------------------
+
+def test_navigate_to_training_sets_mode(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
     app.navigate_to_training_callback()
     assert st.session_state["mode"] == "training_requested"
-    
-    # Test navigation to grading
+
+
+def test_navigate_to_grading_sets_mode(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
     app.navigate_to_grading_callback()
     assert st.session_state["mode"] == "grading_requested"
 
 
-def test_login_callback(prepared_env):
+def test_go_back_callback_pops_stack(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Test correct password
+    st.session_state["nav_stack"] = ["mode_a", "mode_b"]
+    st.session_state["mode"] = "mode_c"
+    app.go_back_callback()
+    assert st.session_state["mode"] == "mode_b"
+    assert len(st.session_state["nav_stack"]) == 1
+
+
+def test_go_back_callback_empty_stack_preserves_mode(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["nav_stack"] = []
+    st.session_state["mode"] = "current"
+    app.go_back_callback()
+    assert st.session_state["mode"] == "current"
+
+
+# ---------------------------------------------------------------------------
+# Login / operator callbacks
+# ---------------------------------------------------------------------------
+
+def test_login_correct_password_navigates_to_training(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
     app.submit_login_callback("1234")
     assert st.session_state["mode"] == "training"
     assert st.session_state.get("login_error") is None
-    
-    # Test incorrect password
+
+
+def test_login_wrong_password_sets_error(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
     app.submit_login_callback("wrong")
     assert st.session_state.get("login_error") is not None
 
 
-def test_operator_callback(prepared_env):
+def test_operator_valid_name_navigates_to_grading(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Test valid operator name
     app.submit_operator_callback("Test Operator")
     assert st.session_state["operator_name"] == "Test Operator"
     assert st.session_state["mode"] == "grading"
-    
-    # Test empty name
+    assert st.session_state.get("operator_error") is None
+
+
+def test_operator_whitespace_name_sets_error(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    app.submit_operator_callback("   ")
+    assert st.session_state.get("operator_error") is not None
+
+
+def test_operator_empty_name_sets_error(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
     app.submit_operator_callback("")
     assert st.session_state.get("operator_error") is not None
 
 
-def test_export_callback_without_grade(prepared_env):
+# ---------------------------------------------------------------------------
+# Export / reset callbacks
+# ---------------------------------------------------------------------------
+
+def test_export_without_grade_sets_error(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Test export without grade - should fail
+    # Grade not set
     app.export_results_callback("00001", "1", "100")
     assert "export_error" in st.session_state
 
 
-def test_export_callback_with_grade(prepared_env):
+def test_export_with_grade_dict_succeeds(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Set grade first
-    st.session_state["Grade"] = 3.0
-    st.session_state["operator_name"] = "Test Operator"
-    
-    # Test export with grade - should succeed
+    st.session_state["grade"] = {"pilling": 3.0}
+    st.session_state["operator_name"] = "Operator"
     app.export_results_callback("00001", "1", "100")
     assert "export_success" in st.session_state
 
 
-def test_reset_grade_callback(prepared_env):
+def test_export_clears_previous_messages(prepared_env):
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Set some state
-    st.session_state["Grade"] = 3.0
-    st.session_state["capture_success"] = "Success"
-    
-    # Reset
-    app.reset_grade_callback()
-    
-    # Check grade is cleared
-    assert "Grade" not in st.session_state
-    assert "capture_success" not in st.session_state
+    st.session_state["export_success"] = "Old success"
+    st.session_state["export_error"] = "Old error"
+    # No grade — sets a fresh error, old keys cleared first
+    app.export_results_callback("00001", "1", "100")
+    assert st.session_state.get("export_success") is None
 
 
-def test_cached_functions(prepared_env):
+def test_reset_grade_clears_grade_and_messages(prepared_env):
     app = _import_app_module()
-    
-    # Test cached functions work
+    st = prepared_env["st"]
+    st.session_state["grade"] = {"pilling": 3.0}
+    st.session_state["capture_success"] = "ok"
+    st.session_state["histogram_success"] = "ok"
+    app.reset_grade_callback()
+    assert "grade" not in st.session_state
+    assert "capture_success" not in st.session_state
+    assert "histogram_success" not in st.session_state
+
+
+def test_clear_grading_messages(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["capture_success"] = "ok"
+    st.session_state["capture_error"] = "err"
+    st.session_state["diff_success"] = "ok"
+    app.clear_grading_messages_callback()
+    for key in ("capture_success", "capture_error", "diff_success"):
+        assert key not in st.session_state
+
+
+def test_clear_training_messages(prepared_env):
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["capture_success_training"] = "ok"
+    st.session_state["capture_error_training"] = "err"
+    st.session_state["diff_success_training"] = "ok"
+    app.clear_training_messages_callback()
+    for key in ("capture_success_training", "capture_error_training", "diff_success_training"):
+        assert key not in st.session_state
+
+
+# ---------------------------------------------------------------------------
+# cached_* wrappers
+# ---------------------------------------------------------------------------
+
+def test_cached_get_available_samples(prepared_env):
+    app = _import_app_module()
     samples = app.cached_get_available_samples("for_grading", 0)
     assert len(samples) == 5
-    
-    # Updated to include trial_number and epoch parameters
+
+
+def test_cached_check_required_images_returns_status_dict(prepared_env):
+    app = _import_app_module()
     status = app.cached_check_required_images("00001", "1", "1", "for_grading", 0)
     assert isinstance(status, dict)
     assert "present_input_images" in status
+    assert "all_input_present" in status
 
 
-def test_display_grades_function(prepared_env):
+# ---------------------------------------------------------------------------
+# capture_grading_callback
+# ---------------------------------------------------------------------------
+
+def test_capture_grading_stage_zero_succeeds(prepared_env):
+    """Stage-0 capture requires no prior stage-0 file."""
     app = _import_app_module()
-    
-    # Test with valid grade
-    app.display_grades(3.5, "00001", "1")
-    
-    # Test with None grade
-    app.display_grades(None, "00001", "1")
+    st = prepared_env["st"]
+    app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
+    assert st.session_state.get("capture_error") is None
+    assert st.session_state.get("capture_success") is not None
 
 
-def test_capture_grading_callback_success(prepared_env):
+def test_capture_grading_non_zero_stage_without_stage0_sets_error(prepared_env):
+    """Non-zero stage without existing stage-0 input image should set capture_error."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+    app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
+    assert st.session_state.get("capture_error") is not None
+    assert "Stage 0" in st.session_state["capture_error"]
+
+
+def test_capture_grading_with_stage0_file_runs_full_pipeline(prepared_env):
+    """Non-zero stage with stage-0 file triggers capture, diff, and analysis."""
     app = _import_app_module()
     st = prepared_env["st"]
 
-    def test_capture_grading_callback_stage_zero(prepared_env, monkeypatch):
-        """Test capturing stage 0 (reference image) in grading mode"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Capture stage 0 - no reference needed
-        app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
-        
-        # Should succeed without error
-        assert st.session_state.get("capture_error") is None
-        assert st.session_state.get("capture_success") is not None
+    stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_grading"
+    stage0_dir.mkdir(parents=True, exist_ok=True)
+    (stage0_dir / "00001-0-1-1.png").touch()
+
+    app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
+    assert st.session_state.get("capture_error") is None
+    assert st.session_state.get("capture_success") is not None
+    assert st.session_state.get("diff_success") is not None
+    grades = st.session_state.get("grade")
+    assert grades is not None
+    assert "pilling" in grades
 
 
-    def test_capture_training_callback_stage_zero(prepared_env, monkeypatch):
-        """Test capturing stage 0 (reference image) in training mode"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Capture stage 0 - no reference needed
-        app.capture_training_callback("00001", "0", "1", "for_training", "127.0.0.1", 18812, 2.5)
-        
-        # Should succeed without error
-        assert st.session_state.get("capture_error_training") is None
-        assert st.session_state.get("capture_success_training") is not None
-
-
-    def test_capture_grading_callback_missing_reference(prepared_env, monkeypatch):
-        """Test that capturing non-zero stage without reference fails gracefully"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Try to capture stage 1 without reference
-        app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
-        
-        # Should have error about missing reference
-        assert st.session_state.get("capture_error") is not None
-        assert "Reference image not found" in st.session_state.get("capture_error", "")
-
-
-    def test_capture_training_callback_missing_reference(prepared_env, monkeypatch):
-        """Test that capturing non-zero stage without reference fails in training mode"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Try to capture stage 1 without reference
-        app.capture_training_callback("00001", "1", "1", "for_training", "127.0.0.1", 18812, 2.5)
-        
-        # Should have error about missing reference
-        assert st.session_state.get("capture_error_training") is not None
-        assert "Reference image not found" in st.session_state.get("capture_error_training", "")
-
-
-    def test_capture_grading_callback_with_reference(prepared_env, monkeypatch):
-        """Test successful capture in grading mode with reference"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Create stage-0 input image (required before capturing any stage > 0)
-        stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_grading"
-        stage0_dir.mkdir(parents=True, exist_ok=True)
-        (stage0_dir / "00001-0-1-1.png").touch()
-
-        # Capture stage 1 with stage-0 baseline present
-        app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
-        
-        # Should succeed
-        assert st.session_state.get("capture_error") is None
-        assert st.session_state.get("capture_success") is not None
-        assert st.session_state.get("diff_success") is not None
-
-
-    def test_capture_training_callback_with_reference(prepared_env, monkeypatch):
-        """Test successful capture in training mode with reference"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Create stage-0 input image (required before capturing any stage > 0)
-        stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_training"
-        stage0_dir.mkdir(parents=True, exist_ok=True)
-        (stage0_dir / "00001-0-1-1.png").touch()
-
-        # Capture stage 1 with stage-0 baseline present
-        app.capture_training_callback("00001", "1", "1", "for_training", "127.0.0.1", 18812, 2.5)
-        
-        # Should succeed
-        assert st.session_state.get("capture_error_training") is None
-        assert st.session_state.get("capture_success_training") is not None
-        assert prepared_env["ha"]._train_called["called"] is True
-
-
-    def test_capture_grading_callback_with_exception(prepared_env, monkeypatch):
-        """Test that exceptions in capture_grading_callback are handled"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Mock __file__ to point to tmp directory
-        monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-        
-        # Mock capture_images_action to raise an exception
-        def mock_capture(*args, **kwargs):
-            raise RuntimeError("Simulated capture failure")
-        
-        monkeypatch.setattr(app, "capture_images_action", mock_capture)
-        
-        # Should handle exception gracefully
-        app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
-        
-        assert st.session_state.get("capture_error") is not None
-        assert "Unexpected error" in st.session_state.get("capture_error", "")
-
-
-    def test_create_difference_action_with_exception(prepared_env, monkeypatch):
-        """Test that exceptions in create_difference_action are handled"""
-        app = _import_app_module()
-        
-        # Mock create_difference_images to raise an exception
-        diff_module = sys.modules["image_difference"]
-        
-        def mock_create(*args, **kwargs):
-            raise RuntimeError("Simulated difference creation failure")
-        
-        monkeypatch.setattr(diff_module, "create_difference_images", mock_create)
-        
-        result = app.create_difference_action("00001", "1", "1", "for_grading", "0")
-        assert result is False
-
-
-    def test_capture_images_action_with_exception(prepared_env, monkeypatch):
-        """Test that exceptions in capture_images_action are handled"""
-        app = _import_app_module()
-        
-        # Mock capture_sample_images to raise an exception
-        cam_module = sys.modules["camera_control"]
-        
-        def mock_capture(*args, **kwargs):
-            raise RuntimeError("Simulated camera failure")
-        
-        monkeypatch.setattr(cam_module, "capture_sample_images", mock_capture)
-        
-        result = app.capture_images_action("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
-        assert result is False
-
-
-    def test_export_with_invalid_operator_name(prepared_env):
-        """Test export with special characters in operator name"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        st.session_state["Grade"] = 3.0
-        st.session_state["operator_name"] = "Test@#$%Operator!!!"
-        
-        app.export_results_callback("00001", "1", "100")
-        
-        # Should sanitize operator name and succeed
-        assert "export_success" in st.session_state
-
-
-    def test_clear_training_messages_callback(prepared_env):
-        """Test that clear_training_messages_callback clears all training messages"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Set various training messages
-        st.session_state["capture_success_training"] = "Success"
-        st.session_state["capture_error_training"] = "Error"
-        st.session_state["diff_success_training"] = "Success"
-        
-        app.clear_training_messages_callback()
-        
-        # All should be cleared
-        assert "capture_success_training" not in st.session_state
-        assert "capture_error_training" not in st.session_state
-        assert "diff_success_training" not in st.session_state
-
-
-    def test_clear_grading_messages_callback(prepared_env):
-        """Test that clear_grading_messages_callback clears all grading messages"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Set various grading messages
-        st.session_state["capture_success"] = "Success"
-        st.session_state["capture_error"] = "Error"
-        st.session_state["diff_success"] = "Success"
-        
-        app.clear_grading_messages_callback()
-        
-        # All should be cleared
-        assert "capture_success" not in st.session_state
-        assert "capture_error" not in st.session_state
-        assert "diff_success" not in st.session_state
-
-
-    def test_go_back_callback_with_stack(prepared_env):
-        """Test that go_back_callback pops from navigation stack"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        # Build a navigation stack
-        st.session_state["nav_stack"] = ["mode1", "mode2"]
-        st.session_state["mode"] = "mode3"
-        
-        app.go_back_callback()
-        
-        # Should pop from stack
-        assert st.session_state["mode"] == "mode2"
-        assert len(st.session_state["nav_stack"]) == 1
-
-
-    def test_go_back_callback_empty_stack(prepared_env):
-        """Test that go_back_callback handles empty stack"""
-        app = _import_app_module()
-        st = prepared_env["st"]
-        
-        st.session_state["nav_stack"] = []
-        st.session_state["mode"] = "current_mode"
-        
-        app.go_back_callback()
-        
-        # Mode should remain unchanged
-        assert st.session_state["mode"] == "current_mode"
-
-
-def test_capture_training_callback_success(prepared_env, monkeypatch):
+def test_capture_grading_exception_sets_error(prepared_env, monkeypatch):
+    """Exception in capture propagates as a capture_error message."""
     app = _import_app_module()
     st = prepared_env["st"]
-    
-    # Mock __file__ to point to tmp directory so app uses correct base path
-    monkeypatch.setattr(app, '__file__', str(prepared_env["tmp"] / "app.py"))
-    
-    # Create stage-0 input image (required before capturing any stage > 0)
+
+    # Patch at the callback level so the exception escapes capture_images_action
+    def _raise(*args, **kwargs):
+        raise RuntimeError("hardware fault")
+
+    monkeypatch.setattr(app, "capture_images_action", _raise)
+    app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
+    assert st.session_state.get("capture_error") is not None
+    assert "Unexpected error" in st.session_state["capture_error"]
+
+
+# ---------------------------------------------------------------------------
+# capture_training_callback
+# ---------------------------------------------------------------------------
+
+def test_capture_training_stage_zero_succeeds(prepared_env):
+    """Stage-0 training capture requires no prior stage-0 file."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+    app.capture_training_callback(
+        "00001", "0", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
+    )
+    assert st.session_state.get("capture_error_training") is None
+    assert st.session_state.get("capture_success_training") is not None
+
+
+def test_capture_training_non_zero_stage_without_stage0_sets_error(prepared_env):
+    """Non-zero training stage without stage-0 file sets capture_error_training."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+    app.capture_training_callback(
+        "00001", "1", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
+    )
+    assert st.session_state.get("capture_error_training") is not None
+    assert "Stage 0" in st.session_state["capture_error_training"]
+
+
+def test_capture_training_with_stage0_calls_analyze(prepared_env):
+    """Non-zero training stage with stage-0 file calls analyze_difference_images."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+
     stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_training"
     stage0_dir.mkdir(parents=True, exist_ok=True)
     (stage0_dir / "00001-0-1-1.png").touch()
-    
-    app.capture_training_callback("00001", "1", "1", "for_training", "127.0.0.1", 18812, 2.5)
-    
+
+    app.capture_training_callback(
+        "00001", "1", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
+    )
     assert st.session_state.get("capture_success_training") is not None
+    assert prepared_env["ha"]._train_called["called"] is True
+
+
+def test_capture_training_multi_grade_dict(prepared_env):
+    """Training accepts a multi-grade dict."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+
+    stage0_dir = prepared_env["tmp"] / "input_pictures" / "for_training"
+    stage0_dir.mkdir(parents=True, exist_ok=True)
+    (stage0_dir / "00002-0-1-1.png").touch()
+
+    app.capture_training_callback(
+        "00002", "1", "1", "for_training", "127.0.0.1", 18812,
+        {"pilling": 2.5, "matting": 3.0, "fuzzing": 2.0},
+    )
     assert prepared_env["ha"]._train_called["called"] is True
