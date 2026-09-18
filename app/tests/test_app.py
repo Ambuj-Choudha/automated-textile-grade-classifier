@@ -623,25 +623,16 @@ def test_reset_grade_clears_grade_and_messages(prepared_env):
     assert "histogram_success" not in st.session_state
 
 
-def test_clear_grading_messages(prepared_env):
+def test_clear_messages_callback(prepared_env):
+    """Both modes share one status-message clearing callback."""
     app = _import_app_module()
     st = prepared_env["st"]
     st.session_state["capture_success"] = "ok"
     st.session_state["capture_error"] = "err"
     st.session_state["diff_success"] = "ok"
-    app.clear_grading_messages_callback()
-    for key in ("capture_success", "capture_error", "diff_success"):
-        assert key not in st.session_state
-
-
-def test_clear_training_messages(prepared_env):
-    app = _import_app_module()
-    st = prepared_env["st"]
-    st.session_state["capture_success_training"] = "ok"
-    st.session_state["capture_error_training"] = "err"
-    st.session_state["diff_success_training"] = "ok"
-    app.clear_training_messages_callback()
-    for key in ("capture_success_training", "capture_error_training", "diff_success_training"):
+    st.session_state["histogram_success"] = "ok"
+    app.clear_messages_callback()
+    for key in ("capture_success", "capture_error", "diff_success", "histogram_success"):
         assert key not in st.session_state
 
 
@@ -664,14 +655,26 @@ def test_cached_check_required_images_returns_status_dict(prepared_env):
 
 
 # ---------------------------------------------------------------------------
-# capture_grading_callback
+# capture_callback — unified pipeline for both grading and training
 # ---------------------------------------------------------------------------
+
+def _grading_params(sample="00001", stage="0", trial="1", ip="127.0.0.1", port=18812):
+    return {"sample_number": sample, "stage_number": stage, "trial_number": trial,
+            "motor_ip": ip, "motor_port": port}
+
+
+def _training_params(sample="00001", stage="0", trial="1", ip="127.0.0.1", port=18812,
+                     grades=None):
+    return {"sample_number": sample, "stage_number": stage, "trial_number": trial,
+            "motor_ip": ip, "motor_port": port,
+            "grades_input": grades if grades is not None else {"pilling": 2.5}}
+
 
 def test_capture_grading_stage_zero_succeeds(prepared_env):
     """Stage-0 capture requires no prior stage-0 file."""
     app = _import_app_module()
     st = prepared_env["st"]
-    app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
+    app.capture_callback("grading", _grading_params(stage="0"))
     assert st.session_state.get("capture_error") is None
     assert st.session_state.get("capture_success") is not None
 
@@ -680,7 +683,7 @@ def test_capture_grading_non_zero_stage_without_stage0_sets_error(prepared_env):
     """Non-zero stage without existing stage-0 input image should set capture_error."""
     app = _import_app_module()
     st = prepared_env["st"]
-    app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
+    app.capture_callback("grading", _grading_params(stage="1"))
     assert st.session_state.get("capture_error") is not None
     assert "Stage 0" in st.session_state["capture_error"]
 
@@ -694,7 +697,7 @@ def test_capture_grading_with_stage0_file_runs_full_pipeline(prepared_env):
     stage0_dir.mkdir(parents=True, exist_ok=True)
     (stage0_dir / "00001-0-1-1.png").touch()
 
-    app.capture_grading_callback("00001", "1", "1", "for_grading", "127.0.0.1", 18812)
+    app.capture_callback("grading", _grading_params(stage="1"))
     assert st.session_state.get("capture_error") is None
     assert st.session_state.get("capture_success") is not None
     assert st.session_state.get("diff_success") is not None
@@ -708,40 +711,31 @@ def test_capture_grading_exception_sets_error(prepared_env, monkeypatch):
     app = _import_app_module()
     st = prepared_env["st"]
 
-    # Patch at the callback level so the exception escapes capture_images_action
     def _raise(*args, **kwargs):
         raise RuntimeError("hardware fault")
 
     monkeypatch.setattr(app, "capture_images_action", _raise)
-    app.capture_grading_callback("00001", "0", "1", "for_grading", "127.0.0.1", 18812)
+    app.capture_callback("grading", _grading_params(stage="0"))
     assert st.session_state.get("capture_error") is not None
     assert "Unexpected error" in st.session_state["capture_error"]
 
-
-# ---------------------------------------------------------------------------
-# capture_training_callback
-# ---------------------------------------------------------------------------
 
 def test_capture_training_stage_zero_succeeds(prepared_env):
     """Stage-0 training capture requires no prior stage-0 file."""
     app = _import_app_module()
     st = prepared_env["st"]
-    app.capture_training_callback(
-        "00001", "0", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
-    )
-    assert st.session_state.get("capture_error_training") is None
-    assert st.session_state.get("capture_success_training") is not None
+    app.capture_callback("training", _training_params(stage="0"))
+    assert st.session_state.get("capture_error") is None
+    assert st.session_state.get("capture_success") is not None
 
 
 def test_capture_training_non_zero_stage_without_stage0_sets_error(prepared_env):
-    """Non-zero training stage without stage-0 file sets capture_error_training."""
+    """Non-zero training stage without stage-0 file sets capture_error."""
     app = _import_app_module()
     st = prepared_env["st"]
-    app.capture_training_callback(
-        "00001", "1", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
-    )
-    assert st.session_state.get("capture_error_training") is not None
-    assert "Stage 0" in st.session_state["capture_error_training"]
+    app.capture_callback("training", _training_params(stage="1"))
+    assert st.session_state.get("capture_error") is not None
+    assert "Stage 0" in st.session_state["capture_error"]
 
 
 def test_capture_training_with_stage0_calls_analyze(prepared_env):
@@ -753,10 +747,8 @@ def test_capture_training_with_stage0_calls_analyze(prepared_env):
     stage0_dir.mkdir(parents=True, exist_ok=True)
     (stage0_dir / "00001-0-1-1.png").touch()
 
-    app.capture_training_callback(
-        "00001", "1", "1", "for_training", "127.0.0.1", 18812, {"pilling": 2.5}
-    )
-    assert st.session_state.get("capture_success_training") is not None
+    app.capture_callback("training", _training_params(stage="1"))
+    assert st.session_state.get("capture_success") is not None
     assert prepared_env["ha"]._train_called["called"] is True
 
 
@@ -769,8 +761,8 @@ def test_capture_training_multi_grade_dict(prepared_env):
     stage0_dir.mkdir(parents=True, exist_ok=True)
     (stage0_dir / "00002-0-1-1.png").touch()
 
-    app.capture_training_callback(
-        "00002", "1", "1", "for_training", "127.0.0.1", 18812,
-        {"pilling": 2.5, "matting": 3.0, "fuzzing": 2.0},
-    )
+    app.capture_callback("training", _training_params(
+        sample="00002", stage="1",
+        grades={"pilling": 2.5, "matting": 3.0, "fuzzing": 2.0},
+    ))
     assert prepared_env["ha"]._train_called["called"] is True

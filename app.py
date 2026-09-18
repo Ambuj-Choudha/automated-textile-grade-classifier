@@ -21,12 +21,11 @@ from app.settings import config as cfg
 AUTO_CLEAR_CACHE_ON_START = True   # Set False in production to keep caches between restarts
 # ------------------------------------------------------------------
 
-# Session-state key constants — single authoritative source for every key string
+# Session-state key constants — single authoritative source for every key string.
+# Grading and training share the same status keys; only one mode is active at a time.
 _KEY_GRADE = "grade"
 _KEY_CAPTURE_PROG = "capture_in_progress"
-_KEY_CAPTURE_PROG_T = "capture_in_progress_training"
-_KEY_PENDING_GRADING = "pending_capture_grading"
-_KEY_PENDING_TRAINING = "pending_capture_training"
+_KEY_PENDING_CAPTURE = "pending_capture"
 _KEY_CAPTURE_ERROR = "capture_error"
 _KEY_CAPTURE_SUCCESS = "capture_success"
 _KEY_DIFF_SUCCESS = "diff_success"
@@ -36,13 +35,15 @@ _KEY_HIST_ERROR = "histogram_error"
 _KEY_EXPORT_SUCCESS = "export_success"
 _KEY_EXPORT_ERROR = "export_error"
 _KEY_EXPORT_PDF = "export_pdf_path"
-_KEY_CAPTURE_ERROR_T = "capture_error_training"
-_KEY_CAPTURE_SUCCESS_T = "capture_success_training"
-_KEY_DIFF_SUCCESS_T = "diff_success_training"
-_KEY_DIFF_ERROR_T = "diff_error_training"
-_KEY_HIST_SUCCESS_T = "histogram_success_training"
 _KEY_LOGIN_ERROR = "login_error"
 _KEY_OPERATOR_ERROR = "operator_error"
+
+# Pipeline status messages — cleared as a group between runs
+_STATUS_KEYS = (
+    _KEY_CAPTURE_ERROR, _KEY_CAPTURE_SUCCESS,
+    _KEY_DIFF_ERROR, _KEY_DIFF_SUCCESS,
+    _KEY_HIST_ERROR, _KEY_HIST_SUCCESS,
+)
 
 # Streamlit page configuration: title, layout, and sidebar state
 st.set_page_config(
@@ -134,105 +135,86 @@ def restart_app_callback():
     st.session_state.nav_stack = []
     st.session_state.mode = None
 
-def capture_grading_callback(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port):
-    """Callback for capture button in grading mode"""
-    try:
-        if stage_number != "0":
-            stage0_path = os.path.join(cfg.get_input_dir(suffix),
-                                       cfg.make_input_filename(sample_number, "0", trial_number, 1))
-            if not os.path.exists(stage0_path):
-                st.session_state[_KEY_CAPTURE_ERROR] = f"Stage 0 images not found for trial {trial_number}. Please capture stage 0 first."
-                return
+def _mode_suffix(mode: str) -> str:
+    return cfg.SUFFIX_GRADING if mode == "grading" else cfg.SUFFIX_TRAINING
 
-        # Clear any previous error messages at the start
-        st.session_state[_KEY_CAPTURE_ERROR] = None
-        st.session_state[_KEY_CAPTURE_SUCCESS] = None
-        st.session_state[_KEY_DIFF_SUCCESS] = None
-        st.session_state[_KEY_DIFF_ERROR] = None
-        st.session_state[_KEY_HIST_SUCCESS] = None
-        st.session_state[_KEY_HIST_ERROR] = None
 
-        # Mark in progress (UI disables button before this via pending flag)
-        st.session_state[_KEY_CAPTURE_PROG] = True
+def run_capture_pipeline(mode, sample_number, stage_number, trial_number,
+                         motor_ip, motor_port, grades_input=None):
+    """Shared capture → diff → analyze pipeline for both grading and training.
 
-        # Perform capture (spinner shown in UI)
-        capture_success = capture_images_action(sample_number, stage_number, trial_number, "for_grading", motor_ip, motor_port)
+    mode:          "grading" or "training"
+    grades_input:  label dict — required for training, ignored for grading
 
-        if not capture_success:
-            st.session_state[_KEY_CAPTURE_ERROR] = t("image_capture_fail")
-            return
-        else:
-            st.session_state[_KEY_CAPTURE_SUCCESS] = t("image_capture_success")
-            st.session_state.fs_epoch += 1  # bust directory-related caches
+    Reports progress via st.session_state status keys. Returns True on
+    success, False if any step failed.
+    """
+    suffix = _mode_suffix(mode)
 
-        if stage_number != "0":
-            diff_success = create_difference_action(sample_number, stage_number, trial_number, "for_grading", reference_stage="0")
-            if diff_success:
-                st.session_state[_KEY_DIFF_SUCCESS] = t("diff_create_success")
-                st.session_state.fs_epoch += 1  # new diff files -> bust again
-            else:
-                st.session_state[_KEY_DIFF_ERROR] = t("diff_create_fail")
-                return
-
-            grades = run_grading_analysis(
-                sample_number, stage_number, trial_number,
-                selected_grades=st.session_state.get("selected_grades", list(cfg.GRADES)),
+    if stage_number != "0":
+        stage0_path = os.path.join(
+            cfg.get_input_dir(suffix),
+            cfg.make_input_filename(sample_number, "0", trial_number, 1),
+        )
+        if not os.path.exists(stage0_path):
+            st.session_state[_KEY_CAPTURE_ERROR] = (
+                f"Stage 0 images not found for trial {trial_number}. "
+                "Please capture stage 0 first."
             )
-            if grades is not None:
-                st.session_state[_KEY_GRADE] = grades
-                st.session_state[_KEY_HIST_SUCCESS] = t("histogram_success")
-            else:
-                st.session_state[_KEY_HIST_ERROR] = t("histogram_fail")
+            return False
 
+    for k in _STATUS_KEYS:
+        st.session_state[k] = None
+
+    if not capture_images_action(sample_number, stage_number, trial_number,
+                                 suffix, motor_ip, motor_port):
+        st.session_state[_KEY_CAPTURE_ERROR] = t("image_capture_fail")
+        return False
+    st.session_state[_KEY_CAPTURE_SUCCESS] = t("image_capture_success")
+    st.session_state.fs_epoch += 1  # bust directory-related caches
+
+    if stage_number == "0":
+        return True
+
+    if not create_difference_action(sample_number, stage_number, trial_number,
+                                    suffix, reference_stage="0"):
+        st.session_state[_KEY_DIFF_ERROR] = t("diff_create_fail")
+        return False
+    st.session_state[_KEY_DIFF_SUCCESS] = t("diff_create_success")
+    st.session_state.fs_epoch += 1
+
+    if mode == "grading":
+        grades = run_grading_analysis(
+            sample_number, stage_number, trial_number,
+            selected_grades=st.session_state.get("selected_grades", list(cfg.GRADES)),
+        )
+        if grades is None:
+            st.session_state[_KEY_HIST_ERROR] = t("histogram_fail")
+            return False
+        st.session_state[_KEY_GRADE] = grades
+        st.session_state[_KEY_HIST_SUCCESS] = t("histogram_success")
+    else:
+        run_training_analysis(sample_number, stage_number, trial_number, grades_input)
+        st.session_state[_KEY_HIST_SUCCESS] = t("histogram_success")
+
+    return True
+
+
+def capture_callback(mode, params):
+    """Unified callback for both grading and training capture buttons.
+
+    params: dict passed straight to run_capture_pipeline (sample_number,
+            stage_number, trial_number, motor_ip, motor_port, and grades_input
+            for training).
+    """
+    try:
+        st.session_state[_KEY_CAPTURE_PROG] = True
+        run_capture_pipeline(mode=mode, **params)
     except Exception as e:
         st.session_state[_KEY_CAPTURE_ERROR] = f"Unexpected error: {str(e)}"
-        print(f"Error in capture_grading_callback: {e}")
+        print(f"Error in capture_callback ({mode}): {e}")
     finally:
-        # Always clear in-progress flag (covers early returns and exceptions)
         st.session_state[_KEY_CAPTURE_PROG] = False
-
-def capture_training_callback(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port,
-                              grades):
-    """Callback for capture button in training mode"""
-    try:
-        if stage_number != "0":
-            stage0_path = os.path.join(cfg.get_input_dir(suffix),
-                                       cfg.make_input_filename(sample_number, "0", trial_number, 1))
-            if not os.path.exists(stage0_path):
-                st.session_state[_KEY_CAPTURE_ERROR_T] = f"Stage 0 images not found for trial {trial_number}. Please capture stage 0 first."
-                return
-
-        st.session_state[_KEY_CAPTURE_ERROR_T] = None
-        st.session_state[_KEY_CAPTURE_PROG_T] = True
-
-        capture_success = capture_images_action(sample_number, stage_number, trial_number, "for_training", motor_ip, motor_port)
-
-        if not capture_success:
-            st.session_state[_KEY_CAPTURE_ERROR_T] = t("image_capture_fail")
-            return
-        else:
-            st.session_state[_KEY_CAPTURE_SUCCESS_T] = t("image_capture_success")
-            st.session_state.fs_epoch += 1
-
-        if stage_number != "0":
-            with st.spinner(t("diff_create_spinner")):
-                diff_success = create_difference_action(sample_number, stage_number, trial_number, "for_training", reference_stage="0")
-                if diff_success:
-                    st.session_state[_KEY_DIFF_SUCCESS_T] = t("diff_create_success")
-                    st.session_state.fs_epoch += 1
-                else:
-                    st.session_state[_KEY_DIFF_ERROR_T] = t("diff_create_fail")
-                    return
-
-            with st.spinner(t("histogram_spinner")):
-                run_training_analysis(sample_number, stage_number, trial_number, grades)
-                st.session_state[_KEY_HIST_SUCCESS_T] = t("histogram_success")
-
-    except Exception as e:
-        st.session_state[_KEY_CAPTURE_ERROR_T] = f"Unexpected error: {str(e)}"
-        print(f"Error in capture_training_callback: {e}")
-    finally:
-        st.session_state[_KEY_CAPTURE_PROG_T] = False
 
 def export_results_callback(sample_number, stage_number, load_weight, trial_number="1"):
     """Callback for export results button"""
@@ -329,16 +311,9 @@ def go_back_callback():
     if stack:
         st.session_state.mode = stack.pop()
 
-def clear_training_messages_callback():
-    """Callback to clear training messages"""
-    for key in [_KEY_CAPTURE_SUCCESS_T, _KEY_CAPTURE_ERROR_T, _KEY_DIFF_SUCCESS_T,
-                _KEY_DIFF_ERROR_T, _KEY_HIST_SUCCESS_T]:
-        st.session_state.pop(key, None)
-
-def clear_grading_messages_callback():
-    """Callback to clear grading messages"""
-    for key in [_KEY_CAPTURE_SUCCESS, _KEY_CAPTURE_ERROR, _KEY_DIFF_SUCCESS,
-                _KEY_DIFF_ERROR, _KEY_HIST_SUCCESS, _KEY_HIST_ERROR]:
+def clear_messages_callback():
+    """Callback to clear all pipeline status messages (both modes share these)."""
+    for key in _STATUS_KEYS:
         st.session_state.pop(key, None)
 
 # ------------------------------------------------------------------
@@ -458,69 +433,107 @@ def _render_logo():
         st.image(os.path.join("logos", "Logo_TexIQ_v1.0.jpg"), width=200)
 
 
-def _render_grading_col1(col, motor_ip, motor_port):
-    """Render input + capture column for grading mode.
+# Per-mode UI descriptors used by _render_capture_column.
+# Everything the two flows differ on lives here, so the renderer stays generic.
+_TRAINING_GRADE_INPUTS = (
+    # (grade_name, label_key, error_key, last_key, widget_key)
+    ("pilling", "grade_number",         "invalid_grade",         "last_grade_number_t",         "k_grade_number_t"),
+    ("matting", "matting_grade_number", "invalid_matting_grade", "last_matting_grade_number_t", "k_matting_grade_number_t"),
+    ("fuzzing", "fuzzing_grade_number", "invalid_fuzzing_grade", "last_fuzzing_grade_number_t", "k_fuzzing_grade_number_t"),
+)
 
-    Returns (sample_number, stage_number, trial_number, load_weight, inputs_valid, all_valid).
-    inputs_valid = sample/stage/trial valid (used for status display).
-    all_valid = inputs_valid AND load_valid (used to gate the capture button).
+
+def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None):
+    """Render the input + capture column for either grading or training.
+
+    Returns (sample_number, stage_number, trial_number, extra, inputs_valid, all_valid).
+    `extra` is the load_weight string (grading) or a grades_input dict (training).
+    `inputs_valid` covers sample/stage/trial only — used to gate the status view.
+    `all_valid`    also covers the mode-specific extra input(s).
     """
+    is_grading = mode == "grading"
+    suffix     = _mode_suffix(mode)
+    tag        = "g" if is_grading else "t"
+
     with col:
-        available = cached_get_available_samples(cfg.SUFFIX_GRADING, st.session_state.fs_epoch)
+        available = cached_get_available_samples(suffix, st.session_state.fs_epoch)
         st.info(f"{t('available_samples')}: {len(available)}")
 
-        sample_number = st.text_input(t("sample_number"), value=st.session_state.get("last_sample_number_g", "00000"), key="k_sample_number_g", help="e.g., 00001, 00002, etc.")
-        stage_number  = st.text_input(t("stage_number"),  value=st.session_state.get("last_stage_number_g",  "0"),     key="k_stage_number_g",  help="e.g., 125, 500, 1000, etc.")
-        trial_number  = st.text_input(t("trial_number"),  value=st.session_state.get("last_trial_number_g",  "1"),     key="k_trial_number_g",  help="e.g., 1, 2, 3, etc.")
-        load_weight   = st.text_input(t("load_weight"),   value=st.session_state.get("last_load_weight_g",   "0"),     key="k_load_weight_g",   help="e.g., 155, 415, etc.")
+        sample_number = st.text_input(t("sample_number"), value=st.session_state.get(f"last_sample_number_{tag}", "00000"), key=f"k_sample_number_{tag}", help="e.g., 00001, 00002, etc.")
+        stage_number  = st.text_input(t("stage_number"),  value=st.session_state.get(f"last_stage_number_{tag}",  "0"),     key=f"k_stage_number_{tag}",  help="e.g., 125, 500, 1000, etc.")
+        trial_number  = st.text_input(t("trial_number"),  value=st.session_state.get(f"last_trial_number_{tag}",  "1"),     key=f"k_trial_number_{tag}",  help="e.g., 1, 2, 3, etc.")
+        st.session_state[f"last_sample_number_{tag}"] = sample_number
+        st.session_state[f"last_stage_number_{tag}"]  = stage_number
+        st.session_state[f"last_trial_number_{tag}"]  = trial_number
 
-        st.session_state.last_sample_number_g = sample_number
-        st.session_state.last_stage_number_g  = stage_number
-        st.session_state.last_trial_number_g  = trial_number
-        st.session_state.last_load_weight_g   = load_weight
+        # Mode-specific inputs
+        load_weight = None
+        grades_input: dict = {}
+        extra_valid = True
+
+        if is_grading:
+            load_weight = st.text_input(t("load_weight"), value=st.session_state.get("last_load_weight_g", "0"), key="k_load_weight_g", help="e.g., 155, 415, etc.")
+            st.session_state.last_load_weight_g = load_weight
+            if not validate_input_number(load_weight):
+                st.error(t("invalid_load"))
+                extra_valid = False
+        else:
+            for name, label_key, err_key, last_key, widget_key in _TRAINING_GRADE_INPUTS:
+                if name not in (selected_grades or ()):
+                    continue
+                val = st.text_input(t(label_key), value=st.session_state.get(last_key, "1"), key=widget_key, help="e.g., 1.5, 2, 2.5, etc.")
+                st.session_state[last_key] = val
+                if not validate_grade(val):
+                    st.error(t(err_key))
+                    extra_valid = False
+                else:
+                    grades_input[name] = float(val)
 
         sample_valid = validate_input_number(sample_number)
         stage_valid  = validate_input_number(stage_number)
         trial_valid  = validate_input_number(trial_number)
-        load_valid   = validate_input_number(load_weight)
 
         if not sample_valid: st.error(t("invalid_sample"))
         if not stage_valid:  st.error(t("invalid_stage"))
         if not trial_valid:  st.error(t("invalid_trial"))
-        if not load_valid:   st.error(t("invalid_load"))
 
         inputs_valid = sample_valid and stage_valid and trial_valid
-        all_valid    = inputs_valid and load_valid
+        all_valid    = inputs_valid and extra_valid
 
         if all_valid:
             st.success(t("valid_input"))
-            image_status = cached_check_required_images(sample_number, stage_number, trial_number, "for_grading", st.session_state.fs_epoch)
+            image_status = cached_check_required_images(sample_number, stage_number, trial_number, suffix, st.session_state.fs_epoch)
             if image_status['all_input_present']:
                 st.info(f"📁 {len(image_status['present_input_images'])} {t('available_samples').lower()}")
 
         st.markdown("---")
 
+        button_label = t("capture_button" if is_grading else "capture_button_training")
+        button_key   = "btn_capture_grading" if is_grading else "btn_capture_training"
         spinner_slot = st.empty()
         clicked = st.button(
-            t("capture_button"),
-            key="btn_capture_grading",
+            button_label,
+            key=button_key,
             disabled=(not inputs_valid) or st.session_state.get(_KEY_CAPTURE_PROG, False),
         )
         if clicked and not st.session_state.get(_KEY_CAPTURE_PROG, False):
             st.session_state[_KEY_CAPTURE_PROG] = True
-            st.session_state[_KEY_PENDING_GRADING] = {
+            params = {
                 "sample_number": sample_number, "stage_number": stage_number,
-                "trial_number": trial_number, "suffix": "for_grading",
+                "trial_number": trial_number,
                 "motor_ip": motor_ip, "motor_port": motor_port,
             }
+            if not is_grading:
+                params["grades_input"] = grades_input
+            st.session_state[_KEY_PENDING_CAPTURE] = {"mode": mode, "params": params}
             st.rerun()
 
-        if st.session_state.get(_KEY_PENDING_GRADING):
+        if st.session_state.get(_KEY_PENDING_CAPTURE):
             with spinner_slot:
                 with st.spinner(t("image_capture_spinner")):
-                    p = st.session_state[_KEY_PENDING_GRADING]
-                    capture_grading_callback(p["sample_number"], p["stage_number"], p["trial_number"], p["suffix"], p["motor_ip"], p["motor_port"])
-            st.session_state[_KEY_PENDING_GRADING] = None
+                    p = st.session_state[_KEY_PENDING_CAPTURE]
+                    capture_callback(p["mode"], p["params"])
+            st.session_state[_KEY_PENDING_CAPTURE] = None
             st.rerun()
 
         if st.session_state.get(_KEY_CAPTURE_ERROR):   st.error(st.session_state[_KEY_CAPTURE_ERROR])
@@ -530,10 +543,11 @@ def _render_grading_col1(col, motor_ip, motor_port):
         if st.session_state.get(_KEY_HIST_SUCCESS):    st.success(st.session_state[_KEY_HIST_SUCCESS])
         if st.session_state.get(_KEY_HIST_ERROR):      st.error(st.session_state[_KEY_HIST_ERROR])
 
-    return sample_number, stage_number, trial_number, load_weight, inputs_valid, all_valid
+    extra = load_weight if is_grading else grades_input
+    return sample_number, stage_number, trial_number, extra, inputs_valid, all_valid
 
 
-def _render_grading_col2(col, sample_number, stage_number, trial_number, load_weight, inputs_valid):
+def _render_grading_results_column(col, sample_number, stage_number, trial_number, load_weight, inputs_valid):
     """Render results + export + status column for grading mode."""
     with col:
         st.subheader(t("results"))
@@ -557,150 +571,49 @@ def _render_grading_col2(col, sample_number, stage_number, trial_number, load_we
         st.markdown("---")
         st.subheader(t("status"))
         if inputs_valid:
-            display_operation_status(sample_number, stage_number, trial_number, "for_grading")
+            display_operation_status(sample_number, stage_number, trial_number, cfg.SUFFIX_GRADING)
         st.markdown("---")
 
 
-def _render_training_col1(col, selected_grades, motor_ip, motor_port):
-    """Render input + capture column for training mode.
-
-    Returns (sample_number, stage_number, trial_number, grades_input, inputs_valid, all_valid).
-    """
-    with col:
-        available = cached_get_available_samples(cfg.SUFFIX_TRAINING, st.session_state.fs_epoch)
-        st.info(f"{t('available_samples')}: {len(available)}")
-
-        sample_number = st.text_input(t("sample_number"), value=st.session_state.get("last_sample_number_t", "00000"), key="k_sample_number_t", help="e.g., 00001, 00002, etc.")
-        stage_number  = st.text_input(t("stage_number"),  value=st.session_state.get("last_stage_number_t",  "0"),     key="k_stage_number_t",  help="e.g., 125, 500, 1000, etc.")
-        trial_number  = st.text_input(t("trial_number"),  value=st.session_state.get("last_trial_number_t",  "1"),     key="k_trial_number_t",  help="e.g., 1, 2, 3, etc.")
-
-        st.session_state.last_sample_number_t = sample_number
-        st.session_state.last_stage_number_t  = stage_number
-        st.session_state.last_trial_number_t  = trial_number
-
-        grades_input: dict = {}
-        grade_inputs_valid = True
-
-        if "pilling" in selected_grades:
-            val = st.text_input(t("grade_number"), value=st.session_state.get("last_grade_number_t", "1"), key="k_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
-            st.session_state.last_grade_number_t = val
-            if not validate_grade(val):
-                st.error(t("invalid_grade"))
-                grade_inputs_valid = False
-            else:
-                grades_input["pilling"] = float(val)
-
-        if "matting" in selected_grades:
-            val = st.text_input(t("matting_grade_number"), value=st.session_state.get("last_matting_grade_number_t", "1"), key="k_matting_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
-            st.session_state.last_matting_grade_number_t = val
-            if not validate_grade(val):
-                st.error(t("invalid_matting_grade"))
-                grade_inputs_valid = False
-            else:
-                grades_input["matting"] = float(val)
-
-        if "fuzzing" in selected_grades:
-            val = st.text_input(t("fuzzing_grade_number"), value=st.session_state.get("last_fuzzing_grade_number_t", "1"), key="k_fuzzing_grade_number_t", help="e.g., 1.5, 2, 2.5, etc.")
-            st.session_state.last_fuzzing_grade_number_t = val
-            if not validate_grade(val):
-                st.error(t("invalid_fuzzing_grade"))
-                grade_inputs_valid = False
-            else:
-                grades_input["fuzzing"] = float(val)
-
-        sample_valid = validate_input_number(sample_number)
-        stage_valid  = validate_input_number(stage_number)
-        trial_valid  = validate_input_number(trial_number)
-
-        if not sample_valid: st.error(t("invalid_sample"))
-        if not stage_valid:  st.error(t("invalid_stage"))
-        if not trial_valid:  st.error(t("invalid_trial"))
-
-        inputs_valid = sample_valid and stage_valid and trial_valid
-        all_valid    = inputs_valid and grade_inputs_valid
-
-        if all_valid:
-            st.success(t("valid_input"))
-            image_status = cached_check_required_images(sample_number, stage_number, trial_number, "for_training", st.session_state.fs_epoch)
-            if image_status['all_input_present']:
-                st.info(f"📁 {len(image_status['present_input_images'])} {t('available_samples').lower()}")
-
-        st.markdown("---")
-
-        spinner_slot_t = st.empty()
-        clicked_t = st.button(
-            t("capture_button_training"),
-            key="btn_capture_training",
-            disabled=(not inputs_valid) or st.session_state.get(_KEY_CAPTURE_PROG_T, False),
-        )
-        if clicked_t and not st.session_state.get(_KEY_CAPTURE_PROG_T, False):
-            st.session_state[_KEY_CAPTURE_PROG_T] = True
-            st.session_state[_KEY_PENDING_TRAINING] = {
-                "sample_number": sample_number, "stage_number": stage_number,
-                "trial_number": trial_number, "suffix": "for_training",
-                "motor_ip": motor_ip, "motor_port": motor_port,
-                "grades": grades_input,
-            }
-            st.rerun()
-
-        if st.session_state.get(_KEY_PENDING_TRAINING):
-            with spinner_slot_t:
-                with st.spinner(t("image_capture_spinner")):
-                    p = st.session_state[_KEY_PENDING_TRAINING]
-                    capture_training_callback(p["sample_number"], p["stage_number"], p["trial_number"], p["suffix"], p["motor_ip"], p["motor_port"], p["grades"])
-            st.session_state[_KEY_PENDING_TRAINING] = None
-            st.rerun()
-
-        if st.session_state.get(_KEY_CAPTURE_ERROR_T):   st.error(st.session_state[_KEY_CAPTURE_ERROR_T])
-        if st.session_state.get(_KEY_CAPTURE_SUCCESS_T): st.success(st.session_state[_KEY_CAPTURE_SUCCESS_T])
-
-    return sample_number, stage_number, trial_number, grades_input, inputs_valid, all_valid
-
-
-def _render_training_col2(col, sample_number, stage_number, trial_number, inputs_valid):
+def _render_training_status_column(col, sample_number, stage_number, trial_number, inputs_valid):
     """Render status column for training mode."""
     with col:
         st.subheader(t("status"))
         if inputs_valid:
-            display_operation_status(sample_number, stage_number, trial_number, "for_training")
+            display_operation_status(sample_number, stage_number, trial_number, cfg.SUFFIX_TRAINING)
         st.markdown("---")
 
 
-def show_grading_mode():
+def _render_mode_screen(mode, title_key, back_key):
+    """Shared skeleton for both grading and training screens."""
     _render_logo()
-    st.markdown("<h1 style='text-align: center;'>" + t("title_grading") + "</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>" + t(title_key) + "</h1>", unsafe_allow_html=True)
     if can_go_back():
-        _, _, col = st.columns([3, 3, 1])
+        spec = [3, 3, 1] if mode == "grading" else [1, 1, 1]
+        _, _, col = st.columns(spec)
         with col:
-            st.button("← Back", key="btn_back_grading", on_click=go_back_callback)
+            st.button("← Back", key=back_key, on_click=go_back_callback)
     st.markdown("---")
 
     motor_ip, motor_port, _base_dir = setup_sidebar()
     show_image_viewer()
     st.markdown("---")
 
+    selected_grades = None if mode == "grading" else st.session_state.get("selected_grades", list(cfg.GRADES))
     col1, _, col2 = st.columns([2, 0.5, 2])
-    sample, stage, trial, load, inputs_valid, all_valid = _render_grading_col1(col1, motor_ip, motor_port)
-    _render_grading_col2(col2, sample, stage, trial, load, inputs_valid)
+    sample, stage, trial, extra, inputs_valid, _ = _render_capture_column(col1, mode, motor_ip, motor_port, selected_grades)
+    if mode == "grading":
+        _render_grading_results_column(col2, sample, stage, trial, extra, inputs_valid)
+    else:
+        _render_training_status_column(col2, sample, stage, trial, inputs_valid)
+
+
+def show_grading_mode():
+    _render_mode_screen("grading", "title_grading", "btn_back_grading")
 
 
 def show_training_mode():
-    _render_logo()
-    st.markdown("<h1 style='text-align: center;'>" + t("title_training") + "</h1>", unsafe_allow_html=True)
-    if can_go_back():
-        _, _, col = st.columns([1, 1, 1])
-        with col:
-            st.button("← Back", key="btn_back_training", on_click=go_back_callback)
-    st.markdown("---")
-
-    motor_ip, motor_port, _base_dir = setup_sidebar()
-    show_image_viewer()
-    st.markdown("---")
-
-    selected_grades = st.session_state.get("selected_grades", list(cfg.GRADES))
-    col1, _, col2 = st.columns([2, 0.5, 2])
-    sample, stage, trial, _grades, inputs_valid, _all_valid = _render_training_col1(col1, selected_grades, motor_ip, motor_port)
-    _render_training_col2(col2, sample, stage, trial, inputs_valid)
+    _render_mode_screen("training", "title_training", "btn_back_training")
 
 
 def capture_images_action(sample_number, stage_number, trial_number, suffix, motor_ip, motor_port):
@@ -866,11 +779,9 @@ def main():
         st.session_state[_KEY_GRADE] = None
     if "fs_epoch" not in st.session_state:
         st.session_state.fs_epoch = 0  # cache-busting counter for filesystem changes
-    # Ensure progress flags exist (default False) to safely use in UI disabled conditions
+    # Ensure progress flag exists (default False) to safely use in UI disabled conditions
     if _KEY_CAPTURE_PROG not in st.session_state:
         st.session_state[_KEY_CAPTURE_PROG] = False
-    if _KEY_CAPTURE_PROG_T not in st.session_state:
-        st.session_state[_KEY_CAPTURE_PROG_T] = False
 
     # # Global Back button (shown if there is a previous screen)
     # render_back_button()
