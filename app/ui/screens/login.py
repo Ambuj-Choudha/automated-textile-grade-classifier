@@ -3,7 +3,7 @@ import streamlit as st
 from app.reporting.translations import t
 from app import state as S
 from app.callbacks import can_go_back, go_back_callback, submit_login_callback
-from app.ui.components import render_logo
+from app.ui.views import render_logo
 
 
 def handle_training_login() -> None:

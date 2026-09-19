@@ -114,7 +114,7 @@ def run_capture_pipeline(mode, sample_number, stage_number, trial_number,
     if mode == "grading":
         grades = run_grading_analysis(
             sample_number, stage_number, trial_number,
-            selected_grades=st.session_state.get("selected_grades", list(cfg.GRADES)),
+            selected_grades=st.session_state.get(S.KEY_SELECTED_GRADES, list(cfg.GRADES)),
         )
         if grades is None:
             st.session_state[S.KEY_HIST_ERROR] = t("histogram_fail")

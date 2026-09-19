@@ -4,7 +4,7 @@ from app.reporting.translations import t
 from app.callbacks import (
     navigate_to_training_callback, navigate_to_grading_callback,
 )
-from app.ui.components import render_logo
+from app.ui.views import render_logo
 
 
 def show_mode_selector() -> None:

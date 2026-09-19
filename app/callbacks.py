@@ -63,7 +63,7 @@ def submit_login_callback(password) -> None:
 
 def submit_operator_callback(name) -> None:
     if name.strip():
-        st.session_state["operator_name"] = name.strip()
+        st.session_state[S.KEY_OPERATOR_NAME] = name.strip()
         navigate_to("grading")
         st.session_state[S.KEY_OPERATOR_ERROR] = None
     else:
@@ -76,7 +76,7 @@ def export_results_callback(sample_number, stage_number, load_weight, trial_numb
     st.session_state.pop(S.KEY_EXPORT_SUCCESS, None)
     st.session_state.pop(S.KEY_EXPORT_ERROR, None)
 
-    operator = st.session_state.get("operator_name", "")
+    operator = st.session_state.get(S.KEY_OPERATOR_NAME, "")
     clean_operator_name = "".join(c for c in operator if c.isalnum() or c in ("-", "_")).strip() or "Unknown"
     pdf_filepath = os.path.join("reports", f"{sample_number}-{clean_operator_name}-report.pdf")
 
@@ -153,13 +153,13 @@ def clear_messages_callback() -> None:
 # ---- App control ----
 
 def restart_app_callback() -> None:
-    preserved = {"lang": st.session_state.get("lang", "en")}
+    preserved = {k: st.session_state.get(k) for k in S.RESTART_PRESERVED_KEYS if k in st.session_state}
     try:
         st.cache_data.clear()
     except Exception:
         pass
     for k in list(st.session_state.keys()):
-        if k not in preserved:
+        if k not in S.RESTART_PRESERVED_KEYS:
             del st.session_state[k]
     st.session_state.update(preserved)
     st.session_state[S.KEY_FS_EPOCH] = 0

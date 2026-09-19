@@ -21,7 +21,7 @@ from app.callbacks import (
     can_go_back, go_back_callback,
     export_results_callback, open_pdf_callback, reset_grade_callback,
 )
-from app.ui.components import (
+from app.ui.views import (
     render_logo, show_image_viewer, display_grades, display_operation_status,
 )
 from app.pipeline import capture_callback
@@ -39,6 +39,48 @@ _TRAINING_GRADE_INPUTS = (
     ("matting", "matting_grade_number", "invalid_matting_grade", "last_matting_grade_number_t", "k_matting_grade_number_t"),
     ("fuzzing", "fuzzing_grade_number", "invalid_fuzzing_grade", "last_fuzzing_grade_number_t", "k_fuzzing_grade_number_t"),
 )
+
+
+def _render_capture_button_and_flow(mode: str, params: dict, inputs_valid: bool) -> None:
+    """Render the capture button + the two-phase click flow.
+
+    Streamlit runs on_click callbacks BEFORE render, so a plain on_click can't
+    paint a busy indicator during a multi-minute capture. Instead: the click
+    stashes params + reruns; the next render paints the spinner and only then
+    invokes capture_callback. Do not "simplify" back to a single on_click
+    without validating the busy-indicator UX.
+    """
+    is_grading = mode == "grading"
+    button_label = t("capture_button" if is_grading else "capture_button_training")
+    button_key = "btn_capture_grading" if is_grading else "btn_capture_training"
+    spinner_slot = st.empty()
+
+    clicked = st.button(
+        button_label, key=button_key,
+        disabled=(not inputs_valid) or st.session_state.get(S.KEY_CAPTURE_PROG, False),
+    )
+    if clicked and not st.session_state.get(S.KEY_CAPTURE_PROG, False):
+        st.session_state[S.KEY_CAPTURE_PROG] = True
+        st.session_state[S.KEY_PENDING_CAPTURE] = {"mode": mode, "params": params}
+        st.rerun()
+
+    if st.session_state.get(S.KEY_PENDING_CAPTURE):
+        with spinner_slot:
+            with st.spinner(t("image_capture_spinner")):
+                p = st.session_state[S.KEY_PENDING_CAPTURE]
+                capture_callback(p["mode"], p["params"])
+        st.session_state[S.KEY_PENDING_CAPTURE] = None
+        st.rerun()
+
+
+def _render_status_messages() -> None:
+    """Render the six pipeline-status messages stashed in session_state."""
+    if st.session_state.get(S.KEY_CAPTURE_ERROR):   st.error(st.session_state[S.KEY_CAPTURE_ERROR])
+    if st.session_state.get(S.KEY_CAPTURE_SUCCESS): st.success(st.session_state[S.KEY_CAPTURE_SUCCESS])
+    if st.session_state.get(S.KEY_DIFF_SUCCESS):    st.success(st.session_state[S.KEY_DIFF_SUCCESS])
+    if st.session_state.get(S.KEY_DIFF_ERROR):      st.error(st.session_state[S.KEY_DIFF_ERROR])
+    if st.session_state.get(S.KEY_HIST_SUCCESS):    st.success(st.session_state[S.KEY_HIST_SUCCESS])
+    if st.session_state.get(S.KEY_HIST_ERROR):      st.error(st.session_state[S.KEY_HIST_ERROR])
 
 
 def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None):
@@ -103,40 +145,15 @@ def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None
 
         st.markdown("---")
 
-        button_label = t("capture_button" if is_grading else "capture_button_training")
-        button_key   = "btn_capture_grading" if is_grading else "btn_capture_training"
-        spinner_slot = st.empty()
-        clicked = st.button(
-            button_label,
-            key=button_key,
-            disabled=(not inputs_valid) or st.session_state.get(S.KEY_CAPTURE_PROG, False),
-        )
-        if clicked and not st.session_state.get(S.KEY_CAPTURE_PROG, False):
-            st.session_state[S.KEY_CAPTURE_PROG] = True
-            params = {
-                "sample_number": sample_number, "stage_number": stage_number,
-                "trial_number": trial_number,
-                "motor_ip": motor_ip, "motor_port": motor_port,
-            }
-            if not is_grading:
-                params["grades_input"] = grades_input
-            st.session_state[S.KEY_PENDING_CAPTURE] = {"mode": mode, "params": params}
-            st.rerun()
-
-        if st.session_state.get(S.KEY_PENDING_CAPTURE):
-            with spinner_slot:
-                with st.spinner(t("image_capture_spinner")):
-                    p = st.session_state[S.KEY_PENDING_CAPTURE]
-                    capture_callback(p["mode"], p["params"])
-            st.session_state[S.KEY_PENDING_CAPTURE] = None
-            st.rerun()
-
-        if st.session_state.get(S.KEY_CAPTURE_ERROR):   st.error(st.session_state[S.KEY_CAPTURE_ERROR])
-        if st.session_state.get(S.KEY_CAPTURE_SUCCESS): st.success(st.session_state[S.KEY_CAPTURE_SUCCESS])
-        if st.session_state.get(S.KEY_DIFF_SUCCESS):    st.success(st.session_state[S.KEY_DIFF_SUCCESS])
-        if st.session_state.get(S.KEY_DIFF_ERROR):      st.error(st.session_state[S.KEY_DIFF_ERROR])
-        if st.session_state.get(S.KEY_HIST_SUCCESS):    st.success(st.session_state[S.KEY_HIST_SUCCESS])
-        if st.session_state.get(S.KEY_HIST_ERROR):      st.error(st.session_state[S.KEY_HIST_ERROR])
+        params = {
+            "sample_number": sample_number, "stage_number": stage_number,
+            "trial_number": trial_number,
+            "motor_ip": motor_ip, "motor_port": motor_port,
+        }
+        if not is_grading:
+            params["grades_input"] = grades_input
+        _render_capture_button_and_flow(mode, params, inputs_valid)
+        _render_status_messages()
 
     extra = load_weight if is_grading else grades_input
     return sample_number, stage_number, trial_number, extra, inputs_valid, all_valid
@@ -192,7 +209,7 @@ def _render_mode_screen(mode: str, title_key: str, back_key: str) -> None:
     show_image_viewer()
     st.markdown("---")
 
-    selected_grades = None if mode == "grading" else st.session_state.get("selected_grades", list(cfg.GRADES))
+    selected_grades = None if mode == "grading" else st.session_state.get(S.KEY_SELECTED_GRADES, list(cfg.GRADES))
     col1, _, col2 = st.columns([2, 0.5, 2])
     sample, stage, trial, extra, inputs_valid, _ = _render_capture_column(col1, mode, motor_ip, motor_port, selected_grades)
     if mode == "grading":

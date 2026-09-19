@@ -20,13 +20,7 @@ st.set_page_config(
 from app import state
 from app.logging_setup import setup_logging
 from app.ui.sidebar import render_persistent_sidebar
-from app.ui.screens import (
-    show_mode_selector,
-    handle_training_login,
-    handle_operator_name,
-    show_grading_mode,
-    show_training_mode,
-)
+from app.ui.screens import SCREEN_REGISTRY, show_mode_selector
 
 # Public surface re-exports — kept stable for app/tests/test_app.py so that
 # reorganizing implementation under app/ui/ doesn't force test churn.
@@ -39,7 +33,7 @@ from app.callbacks import (  # noqa: F401
     submit_login_callback, submit_operator_callback, go_back_callback,
     clear_messages_callback, restart_app_callback, can_go_back,
 )
-from app.ui.components import (  # noqa: F401
+from app.ui.views import (  # noqa: F401
     display_grades, display_operation_status,
 )
 from app.pipeline import (  # noqa: F401
@@ -58,16 +52,8 @@ def main() -> None:
     render_persistent_sidebar()
 
     mode = st.session_state[state.KEY_MODE]
-    if mode is None:
-        show_mode_selector()
-    elif mode == "training_requested":
-        handle_training_login()
-    elif mode == "grading_requested":
-        handle_operator_name()
-    elif mode == "training":
-        show_training_mode()
-    elif mode == "grading":
-        show_grading_mode()
+    screen_fn = SCREEN_REGISTRY.get(mode, show_mode_selector)
+    screen_fn()
 
 
 if __name__ == "__main__":

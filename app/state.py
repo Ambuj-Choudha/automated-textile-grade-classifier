@@ -25,6 +25,12 @@ KEY_EXPORT_ERROR = "export_error"
 KEY_EXPORT_PDF = "export_pdf_path"
 KEY_LOGIN_ERROR = "login_error"
 KEY_OPERATOR_ERROR = "operator_error"
+KEY_OPERATOR_NAME = "operator_name"
+KEY_SELECTED_GRADES = "selected_grades"
+KEY_LANG = "lang"
+
+# Restart App drops every session key except these.
+RESTART_PRESERVED_KEYS = frozenset({KEY_LANG})
 
 # Pipeline status messages — cleared as a group between runs.
 STATUS_KEYS = (
@@ -33,7 +39,8 @@ STATUS_KEYS = (
     KEY_HIST_ERROR, KEY_HIST_SUCCESS,
 )
 
-# Dev/runtime flag. Step 3 will move this behind the admin panel.
+# Clear the disk-listing cache on each server boot so off-app edits to data/*/
+# don't get served stale from a prior process.
 AUTO_CLEAR_CACHE_ON_START = True
 
 
@@ -45,7 +52,7 @@ def init_session_state() -> None:
         KEY_GRADE: None,
         KEY_FS_EPOCH: 0,
         KEY_CAPTURE_PROG: False,
-        "lang": "en",
+        KEY_LANG: "en",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -53,13 +60,10 @@ def init_session_state() -> None:
 
 
 def bootstrap_once() -> None:
-    """One-time per-server-process cache reset.
-
-    Why: caches held across a restart can hand out stale directory listings
-    when data/*/ has been edited off-app.
-    """
+    """Run once per server process: cache reset."""
     if "bootstrapped" in st.session_state:
         return
+
     if AUTO_CLEAR_CACHE_ON_START:
         try:
             st.cache_data.clear()
