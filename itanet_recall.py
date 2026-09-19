@@ -326,24 +326,27 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def default_run_dir() -> str:
-    return str(_project_root() / "models" / "itanet" / "run")
-
-
-def default_fls_dir() -> str:
-    return str(_project_root() / "models" / "itanet" / "data")
-
-
 def default_dll_path() -> str:
     return str(_project_root() / "models" / "itanet" / "common" / "itanet.dll")
+
+
+def _grade_run_dir(grade: str) -> str:
+    return str(_project_root() / "models" / "itanet" / grade / "run")
+
+
+def _grade_fls_dir(grade: str) -> str:
+    return str(_project_root() / "models" / "itanet" / grade / "data")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Run ITA-Net recall on a CSV of features. "
-                    "Reads/writes under models/itanet/ (run/ + data/).",
+                    "Reads/writes under models/itanet/<grade>/ (run/ + data/).",
     )
     parser.add_argument("csv_path", help="Input CSV (e.g. output/grading_results/*.csv).")
+    parser.add_argument("--grade", required=True,
+                        choices=["pilling", "matting", "fuzzing"],
+                        help="Which grade network to use (required — recall is per-grade).")
     parser.add_argument("--output", default=None, help="Output CSV path.")
     parser.add_argument("--feature-cols", nargs="+", default=None,
                         help="Explicit feature column names (default: auto-detect numeric).")
@@ -363,13 +366,13 @@ def main():
 
     predict_from_csv(
         csv_path=args.csv_path,
-        data_dir=default_run_dir(),
+        data_dir=_grade_run_dir(args.grade),
         dll_path=default_dll_path(),
         output_path=args.output,
         feature_cols=args.feature_cols,
         clip_range=None if args.no_clip else (1.0, 5.0),
         decimal=args.decimal,
-        fls_dir=default_fls_dir(),
+        fls_dir=_grade_fls_dir(args.grade),
         net_type=args.net_type,
         shuffle=args.shuffle,
     )
