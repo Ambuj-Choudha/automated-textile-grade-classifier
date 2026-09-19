@@ -119,8 +119,6 @@ def _install_dummy_translations(monkeypatch):
             "motor_settings": "Motor settings",
             "motor_ip": "Motor IP",
             "motor_port": "Motor Port",
-            "directory_settings": "Directory settings",
-            "base_directory": "Base directory",
             "view_images": "View images",
             "select_folder": "Select folder",
             "enter_filename": "Enter filename",

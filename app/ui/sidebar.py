@@ -2,9 +2,8 @@
 
 Two entry points:
   - render_persistent_sidebar(): language + App Control. Shown on every screen.
-  - setup_sidebar(): grades / motor / base directory. Shown only on capture screens.
+  - setup_sidebar(): grades + motor settings. Shown only on capture screens.
 """
-import os
 import streamlit as st
 
 from app.reporting.translations import t
@@ -39,7 +38,7 @@ def render_persistent_sidebar() -> None:
 
 
 def setup_sidebar():
-    """Settings section shown on capture screens. Returns (motor_ip, motor_port, base_dir)."""
+    """Settings section shown on capture screens. Returns (motor_ip, motor_port)."""
     with st.sidebar:
         st.header(t("settings"))
 
@@ -64,11 +63,6 @@ def setup_sidebar():
         st.session_state.last_motor_ip = motor_ip
         st.session_state.last_motor_port = motor_port
 
-        st.subheader(t("directory_settings"))
-        default_base_dir = st.session_state.get("last_base_dir", os.getcwd())
-        base_dir = st.text_input(t("base_directory"), value=default_base_dir, key="k_base_dir")
-        st.session_state.last_base_dir = base_dir
-
         st.markdown("---")
 
-    return motor_ip, motor_port, base_dir
+    return motor_ip, motor_port
