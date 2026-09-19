@@ -1,10 +1,37 @@
+from typing import Sequence
+
 import streamlit as st
+
+from app import state as S
 
 
 def t(key: str) -> str:
     """Return the translated string for key using the current session language."""
-    lang = st.session_state.get("lang", "en")
+    lang = st.session_state.get(S.KEY_LANG, "en")
     return translations.get(lang, translations["en"]).get(key, key)
+
+
+def validate_grade_translations(grades: Sequence[str]) -> None:
+    """Raise if any active grade is missing its required translation keys.
+
+    A missing key silently falls back to the key name itself in the UI, which
+    looks like broken rendering rather than an error. Running this at boot
+    turns that class of bug into a loud failure.
+    """
+    en = translations["en"]
+    missing = []
+    for grade in grades:
+        for suf in ("_grade_number", "_grade_result"):
+            key = f"{grade}{suf}"
+            if key not in en:
+                missing.append(key)
+        invalid_key = f"invalid_{grade}_grade"
+        if invalid_key not in en:
+            missing.append(invalid_key)
+    if missing:
+        raise RuntimeError(
+            "Missing translation keys for active grades: " + ", ".join(missing)
+        )
 
 
 translations = {
@@ -23,7 +50,7 @@ translations = {
         "invalid_picture_name": "❌ Picture does not exist! Please enter a valid .png filename.",
         "sample_number": "Sample Number",
         "stage_number": "Assessment Stage",
-        "grade_number": "Pilling Grade",
+        "pilling_grade_number": "Pilling Grade",
         "matting_grade_number": "Matting Grade",
         "fuzzing_grade_number": "Fuzzing Grade",
         "invalid_matting_grade": "❌ Invalid matting grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
@@ -41,7 +68,7 @@ translations = {
         "reset_grade": "♻️ Reset Grade",
         "invalid_sample": "❌ Invalid sample number format. Please provide a valid input. e.g. 001, 002, etc.",
         "invalid_stage": "❌ Invalid Assessment Stage format. Please provide a valid input. e.g. 125, 500, etc.",
-        "invalid_grade": "❌ Invalid grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Invalid grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Invalid Loading Weight format. Please provide a valid input. e.g. 155, 415, etc.",
         "invalid_trial": "❌ Invalid trial number",
         "valid_input": "✅ Input parameters valid",
@@ -86,7 +113,7 @@ translations = {
         "invalid_picture_name": "❌ Bild existiert nicht! Bitte gültigen .png-Dateinamen eingeben.",
         "sample_number": "Probennummer",
         "stage_number": "Bewertungsstufe",
-        "grade_number": "Pilling-Bewertung",
+        "pilling_grade_number": "Pilling-Bewertung",
         "matting_grade_number": "Mattierungs-Bewertung",
         "fuzzing_grade_number": "Fusseln-Bewertung",
         "invalid_matting_grade": "❌ Ungültiges Mattierungs-Format. Z. B. 1.5, 2, 2.5, etc.",
@@ -104,7 +131,7 @@ translations = {
         "reset_grade": "♻️ Bewertung zurücksetzen",
         "invalid_sample": "❌ Ungültiges Probenformat. Z. B. 001, 002, etc.",
         "invalid_stage": "❌ Ungültige Bewertungsstufe. Z. B. 125, 500, etc.",
-        "invalid_grade": "❌ Ungültiges Bewertungsformat. Z. B. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Ungültiges Bewertungsformat. Z. B. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Ungültiges Gewicht. Z. B. 155, 415, etc.",
         "invalid_trial": "❌ Ungültige Testnummer",
         "valid_input": "✅ Eingaben sind gültig",
@@ -149,7 +176,7 @@ translations = {
         "invalid_picture_name": "❌ Image introuvable ! Veuillez entrer un nom de fichier .png valide.",
         "sample_number": "Numéro d'échantillon",
         "stage_number": "Étape d'évaluation",
-        "grade_number": "Note de boulochage",
+        "pilling_grade_number": "Note de boulochage",
         "matting_grade_number": "Note de matage",
         "fuzzing_grade_number": "Note de peluche",
         "invalid_matting_grade": "❌ Format de note de matage invalide. Par ex. 1.5, 2, 2.5, etc.",
@@ -167,7 +194,7 @@ translations = {
         "reset_grade": "♻️ Réinitialiser la note",
         "invalid_sample": "❌ Format du numéro d'échantillon invalide. Par ex. 001, 002, etc.",
         "invalid_stage": "❌ Format de l'étape invalide. Par ex. 125, 500, etc.",
-        "invalid_grade": "❌ Format de note invalide. Par ex. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Format de note invalide. Par ex. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Format de poids invalide. Par ex. 155, 415, etc.",
         "invalid_trial": "❌ Numéro d'essai invalide",
         "valid_input": "✅ Paramètres valides",
@@ -212,7 +239,7 @@ translations = {
         "invalid_picture_name": "❌ ¡Imagen no encontrada! Por favor ingrese un nombre de archivo .png válido.",
         "sample_number": "Número de muestra",
         "stage_number": "Etapa de evaluación",
-        "grade_number": "Grado de Pilling",
+        "pilling_grade_number": "Grado de Pilling",
         "matting_grade_number": "Grado de Matting",
         "fuzzing_grade_number": "Grado de Fuzzing",
         "invalid_matting_grade": "❌ Formato de grado de matting inválido. Ej. 1.5, 2, 2.5, etc.",
@@ -230,7 +257,7 @@ translations = {
         "reset_grade": "♻️ Restablecer grado",
         "invalid_sample": "❌ Formato de número de muestra inválido. Ej. 001, 002, etc.",
         "invalid_stage": "❌ Formato de etapa inválido. Ej. 125, 500, etc.",
-        "invalid_grade": "❌ Formato de grado inválido. Ej. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Formato de grado inválido. Ej. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Formato de peso inválido. Ej. 155, 415, etc.",
         "invalid_trial": "❌ Número de prueba no válido",
         "valid_input": "✅ Parámetros válidos",

@@ -35,7 +35,7 @@ def _mode_suffix(mode: str) -> str:
 # Per-grade descriptor rows for the training input column.
 # Each row: (grade_name, label_key, error_key, last_key, widget_key)
 _TRAINING_GRADE_INPUTS = (
-    ("pilling", "grade_number",         "invalid_grade",         "last_grade_number_t",         "k_grade_number_t"),
+    ("pilling", "pilling_grade_number", "invalid_pilling_grade", "last_pilling_grade_number_t", "k_pilling_grade_number_t"),
     ("matting", "matting_grade_number", "invalid_matting_grade", "last_matting_grade_number_t", "k_matting_grade_number_t"),
     ("fuzzing", "fuzzing_grade_number", "invalid_fuzzing_grade", "last_fuzzing_grade_number_t", "k_fuzzing_grade_number_t"),
 )
