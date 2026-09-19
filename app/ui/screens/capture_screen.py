@@ -97,9 +97,9 @@ def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None
         available = cached_get_available_samples(suffix, st.session_state[S.KEY_FS_EPOCH])
         st.info(f"{t('available_samples')}: {len(available)}")
 
-        sample_number = st.text_input(t("sample_number"), value=st.session_state.get(f"last_sample_number_{tag}", "00000"), key=f"k_sample_number_{tag}", help="e.g., 00001, 00002, etc.")
-        stage_number  = st.text_input(t("stage_number"),  value=st.session_state.get(f"last_stage_number_{tag}",  "0"),     key=f"k_stage_number_{tag}",  help="e.g., 125, 500, 1000, etc.")
-        trial_number  = st.text_input(t("trial_number"),  value=st.session_state.get(f"last_trial_number_{tag}",  "1"),     key=f"k_trial_number_{tag}",  help="e.g., 1, 2, 3, etc.")
+        sample_number = st.text_input(t("sample_number"), value=st.session_state.get(f"last_sample_number_{tag}", "00000"), key=f"k_sample_number_{tag}", help="e.g., 00001, 00002, etc.") or ""
+        stage_number  = st.text_input(t("stage_number"),  value=st.session_state.get(f"last_stage_number_{tag}",  "0"),     key=f"k_stage_number_{tag}",  help="e.g., 125, 500, 1000, etc.") or ""
+        trial_number  = st.text_input(t("trial_number"),  value=st.session_state.get(f"last_trial_number_{tag}",  "1"),     key=f"k_trial_number_{tag}",  help="e.g., 1, 2, 3, etc.") or ""
         st.session_state[f"last_sample_number_{tag}"] = sample_number
         st.session_state[f"last_stage_number_{tag}"]  = stage_number
         st.session_state[f"last_trial_number_{tag}"]  = trial_number
@@ -109,7 +109,7 @@ def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None
         extra_valid = True
 
         if is_grading:
-            load_weight = st.text_input(t("load_weight"), value=st.session_state.get("last_load_weight_g", "0"), key="k_load_weight_g", help="e.g., 155, 415, etc.")
+            load_weight = st.text_input(t("load_weight"), value=st.session_state.get("last_load_weight_g", "0"), key="k_load_weight_g", help="e.g., 155, 415, etc.") or ""
             st.session_state.last_load_weight_g = load_weight
             if not validate_input_number(load_weight):
                 st.error(t("invalid_load"))
@@ -118,7 +118,7 @@ def _render_capture_column(col, mode, motor_ip, motor_port, selected_grades=None
             for name, label_key, err_key, last_key, widget_key in _TRAINING_GRADE_INPUTS:
                 if name not in (selected_grades or ()):
                     continue
-                val = st.text_input(t(label_key), value=st.session_state.get(last_key, "1"), key=widget_key, help="e.g., 1.5, 2, 2.5, etc.")
+                val = st.text_input(t(label_key), value=st.session_state.get(last_key, "1"), key=widget_key, help="e.g., 1.5, 2, 2.5, etc.") or ""
                 st.session_state[last_key] = val
                 if not validate_grade(val):
                     st.error(t(err_key))
