@@ -1,7 +1,8 @@
+import logging
 import os
 import csv
 import tempfile
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import cv2
@@ -10,9 +11,11 @@ from app.helpers.utils import ensure_directory
 from itanet_recall import predict_from_csv
 from app.settings import config as cfg
 
+log = logging.getLogger(__name__)
+
 # Try to import TensorFlow if installed; do not fail if missing
 try:
-    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN optimizations
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
     from tensorflow.keras.models import load_model
 except Exception:
     load_model = None
@@ -21,18 +24,15 @@ except Exception:
 
 FEATURE_HEADERS: Tuple[str, str, str, str, str] = ("Image", "Mean", "Std", "Max", "Mode")
 TRAIN_HEADERS: Tuple[str, str, str, str, str, str] = (*FEATURE_HEADERS, "Grade")
-DIFF_BASE_DIR = os.path.join("data", "difference_pictures")
 
-# Track last-used backend for diagnostics
 LAST_BACKEND_USED: str = "itanet_dll"
 
-# -------- TensorFlow helpers (batch, via CSV) --------
+# -------- TensorFlow helpers --------
 
 _TF_MODEL = None
 
 
 def _get_tf_model():
-    """Load and cache the TensorFlow model (if BACKEND=tf)."""
     global _TF_MODEL
     if _TF_MODEL is not None:
         return _TF_MODEL
@@ -46,9 +46,7 @@ def _get_tf_model():
 
 
 def _tf_batch_predict_csv(csv_path: str, output_path: Optional[str]) -> str:
-    """Run a TF model on a CSV (Mean/Std/Max/Mode) and write predictions CSV."""
     import pandas as pd
-
     df = pd.read_csv(csv_path)
     for col in cfg.FEATURE_COLUMNS:
         if col not in df.columns:
@@ -56,10 +54,7 @@ def _tf_batch_predict_csv(csv_path: str, output_path: Optional[str]) -> str:
     X = df[list(cfg.FEATURE_COLUMNS)].astype(np.float32).to_numpy()
     model = _get_tf_model()
     preds = model.predict(X, verbose=0).reshape(-1)
-
-    # Round to nearest 0.5 and clip [1.0, 5.0]
     preds = np.clip(np.round(preds * 2) / 2.0, 1.0, 5.0)
-
     df_out = df.copy()
     df_out["Predicted_Grade"] = preds
     if output_path is None:
@@ -72,62 +67,42 @@ def _tf_batch_predict_csv(csv_path: str, output_path: Optional[str]) -> str:
 # -------- Image feature extraction --------
 
 def _calculate_image_stats(image_path: str) -> Optional[Tuple[float, float, float, float]]:
-    """
-    Calculate statistics for a single image using grayscale intensities.
-    Returns (mean, std, max, mode) as floats, or None if image cannot be read.
-    """
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         return None
-
     img = image.astype(np.float32)
     mean_val = float(np.mean(img))
     std_val = float(np.std(img))
     max_val = float(np.max(img))
-
-    # Fast mode via histogram (0..255)
     hist = cv2.calcHist([image], [0], None, [256], [0, 256]).reshape(-1)
     mode_val = float(int(np.argmax(hist)))
-
     return mean_val, std_val, max_val, mode_val
 
 
 def _calculate_feature_averages(all_stats: List[List[Union[str, float]]]) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
-    """
-    From rows [filename, mean, std, max, mode], compute (mean_avg, std_avg, max_avg, mode_avg).
-    Returns Nones if empty.
-    """
     if not all_stats:
         return None, None, None, None
     return tuple(float(np.mean([row[i] for row in all_stats])) for i in range(1, 5))
 
 
 def _process_difference_images(diff_dir: str, sample_number: str, stage_number: str, trial_number: str, grade_number: Optional[Union[str, float]] = None) -> List[List[Union[str, float]]]:
-    """
-    Process all difference images and return per-image stats rows.
-    Each row is [filename, mean, std, max, mode] (+ grade if provided).
-    """
     rows: List[List[Union[str, float]]] = []
     for i in range(1, 9):
-        diff_filename = f"{sample_number}-{stage_number}-{trial_number}-{i}-dif.png"
+        diff_filename = cfg.make_difference_filename(sample_number, stage_number, trial_number, i)
         diff_path = os.path.join(diff_dir, diff_filename)
-
         stats_result = _calculate_image_stats(diff_path)
         if stats_result is None:
-            print(f"[WARN] Could not read image: {diff_path}")
+            log.warning("Could not read image: %s", diff_path)
             continue
-
         mean_val, std_val, max_val, mode_val = stats_result
         if grade_number is not None:
             rows.append([diff_filename, mean_val, std_val, max_val, mode_val, grade_number])
         else:
             rows.append([diff_filename, mean_val, std_val, max_val, mode_val])
-
     return rows
 
 
 def _write_csv_with_headers(file_path: str, headers: Sequence[str], data: List[Sequence[Union[str, float]]], append_mode: bool = False) -> None:
-    """Write CSV with headers once; append if requested and file non-empty."""
     file_exists = os.path.exists(file_path)
     file_is_empty = (not file_exists) or os.path.getsize(file_path) == 0
     mode = "a" if append_mode and file_exists and not file_is_empty else "w"
@@ -139,13 +114,7 @@ def _write_csv_with_headers(file_path: str, headers: Sequence[str], data: List[S
         writer.writerows(data)
 
 
-def _get_diff_dir(suffix: str) -> str:
-    """Resolve difference directory from suffix."""
-    return os.path.join(DIFF_BASE_DIR, suffix)
-
-
 def _safe_unlink(path: Optional[str]) -> None:
-    """Best-effort file deletion."""
     if not path:
         return
     try:
@@ -154,178 +123,215 @@ def _safe_unlink(path: Optional[str]) -> None:
         pass
 
 
-# -------- Backend adapter (CSV-only) --------
+# -------- Grade coercion helpers (training) --------
 
-def _run_backend_batch(csv_path: str, output_path: Optional[str], custom_net_file: Optional[str], custom_trn_file: Optional[str]) -> str:
-    """
-    Dispatch prediction to selected backend and return path to predictions CSV.
-    custom_net_file/custom_trn_file are accepted for parity but currently used by ITANET DLL only.
-    """
+def _coerce_grade(grade_number: Union[str, float, None], label: str) -> Optional[float]:
+    """Parse and round a grade value to the nearest half-step; return None on failure."""
+    if grade_number is None:
+        return None
+    try:
+        g = float(str(grade_number).replace(",", "."))
+        return round(g * 2) / 2.0
+    except ValueError:
+        log.error("Invalid %s: %s", label, grade_number)
+        return None
+
+
+def _restamp_grade(rows: List[List], new_grade: float) -> List[List]:
+    """Return a copy of rows with the last column (Grade) replaced by new_grade."""
+    return [row[:-1] + [new_grade] for row in rows]
+
+
+# -------- Backend adapters --------
+
+def _run_backend_for_grade(grade: str, csv_path: str, output_path: Optional[str]) -> str:
+    """Run prediction for a single grade using that grade's model directory."""
     global LAST_BACKEND_USED
     if cfg.BACKEND == "tf":
         LAST_BACKEND_USED = "tf"
-        print("[BACKEND] Using TensorFlow model")
         return _tf_batch_predict_csv(csv_path, output_path)
-
     LAST_BACKEND_USED = "itanet_dll"
-    print("[BACKEND] Using ITANET DLL")
     return predict_from_csv(
         csv_path=csv_path,
-        data_dir=cfg.ITANET_RUN_DIR,
+        data_dir=cfg.get_itanet_run_dir(grade),
         dll_path=cfg.DLL_PATH,
         output_path=output_path,
         feature_cols=cfg.FEATURE_COLUMNS,
         clip_range=cfg.CLIP_RANGE,
-        fls_dir=cfg.ITANET_FLS_DIR,
+        fls_dir=cfg.get_itanet_fls_dir(grade),
     )
+
+
+def _predict_grade_from_features(grade: str, sample_key: str, mean_avg: float, std_avg: float, max_avg: float, mode_avg: float) -> Optional[float]:
+    """Write a temp CSV, run recall for one grade, return the predicted value."""
+    temp_csv = None
+    preds_csv = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="", encoding="utf-8") as f:
+            temp_csv = f.name
+            w = csv.writer(f)
+            w.writerow(list(FEATURE_HEADERS))
+            w.writerow([sample_key, mean_avg, std_avg, max_avg, mode_avg])
+
+        preds_csv = _run_backend_for_grade(grade, temp_csv, None)
+
+        with open(preds_csv, newline="", encoding="utf-8") as f:
+            row = next(csv.DictReader(f), None)
+
+        if not row or "Predicted_Grade" not in row:
+            log.error("No predicted grade in predictions CSV for %s", grade)
+            return None
+        return float(row["Predicted_Grade"].strip())
+
+    except Exception:
+        log.exception("Prediction failed for grade=%s", grade)
+        return None
+    finally:
+        _safe_unlink(temp_csv)
+        _safe_unlink(preds_csv)
 
 
 # -------- Public functions --------
 
-def analyze_difference_images_and_predict_output(sample_number: str, stage_number: str, trial_number: str, output_dir: str = os.path.join("output", "grading_results")) -> Optional[float]:
+def analyze_difference_images_and_predict_output(
+    sample_number: str,
+    stage_number: str,
+    trial_number: str,
+    selected_grades: Optional[Sequence[str]] = None,
+    output_dir: Optional[str] = None,
+) -> Optional[Dict[str, float]]:
     """
-    Analyze per-image stats, write analysis CSV, then perform prediction by:
-      - Creating a temporary single-row CSV with averaged features
-      - Running backend batch recall on that CSV
-      - Reading the predicted grade from the predictions CSV
-    Returns the predicted grade (float) or None on error.
+    Analyze difference images and predict grades for all three grade types
+    (pilling, matting, fuzzing) using independent ITA-Net networks.
+
+    Returns a dict of {grade: float} for each selected grade,
+    or None if feature extraction fails.  Individual grade predictions that
+    fail are omitted from the dict so partial results are still usable.
     """
+    if output_dir is None:
+        output_dir = cfg.GRADING_RESULTS_DIR
+    active_grades = list(selected_grades) if selected_grades is not None else list(cfg.GRADES)
     try:
-        diff_dir = _get_diff_dir("for_grading")
-        analysis_dir = output_dir
-        ensure_directory(analysis_dir)
+        diff_dir = cfg.get_difference_dir(cfg.SUFFIX_GRADING)
+        ensure_directory(output_dir)
 
         if not os.path.exists(diff_dir):
-            print(f"[ERR] Difference pictures directory not found: {diff_dir}")
+            log.error("Difference pictures directory not found: %s", diff_dir)
             return None
 
-        # Extract per-image stats
         all_stats = _process_difference_images(diff_dir, sample_number, stage_number, trial_number)
         if not all_stats:
-            print("[WARN] No valid images found for analysis.")
+            log.warning("No valid images found for analysis")
             return None
 
-        # Compute averages
         mean_avg, std_avg, max_avg, mode_avg = _calculate_feature_averages(all_stats)
         if any(x is None or (isinstance(x, float) and np.isnan(x)) for x in (mean_avg, std_avg, max_avg, mode_avg)):
-            print("[WARN] Invalid averaged features.")
+            log.warning("Invalid averaged features")
             return None
 
-        # Append "Average" row to analysis table (for final CSV)
-        all_stats.append(["Average", mean_avg, std_avg, max_avg, mode_avg])
+        sample_key = f"{sample_number}-{stage_number}-{trial_number}"
 
-        temp_single_csv = None
-        preds_csv = None
-
-        # Create temporary single-row CSV for prediction
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="", encoding="utf-8") as temp_f:
-            temp_single_csv = temp_f.name
-            w = csv.writer(temp_f)
-            w.writerow(list(FEATURE_HEADERS))
-            w.writerow([f"{sample_number}-{stage_number}-{trial_number}", mean_avg, std_avg, max_avg, mode_avg])
-
-        try:
-            # Run backend batch on the temporary single-row CSV
-            preds_csv = _run_backend_batch(
-                temp_single_csv,
-                None,
-                custom_net_file=(cfg.CUSTOM_NET or os.environ.get("CUSTOM_NET")),
-                custom_trn_file=(cfg.CUSTOM_TRN or os.environ.get("CUSTOM_TRN")),
-            )
-
-            # Read predicted grade
-            with open(preds_csv, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                row = next(reader, None)
-
-            if not row or "Predicted_Grade" not in row:
-                print("[ERR] No predicted grade found in predictions CSV.")
-                return None
-
-            grade_str = str(row["Predicted_Grade"]).strip()
+        # Mock prediction path — returns synthetic grades without a trained .NET
+        if cfg.MOCK_PREDICTION:
             try:
-                prediction = float(grade_str)
+                stage_val = int(stage_number)
             except ValueError:
-                print(f"[ERR] Invalid predicted grade: {grade_str}")
-                prediction = None
+                stage_val = 0
+            mock_base = max(1.0, min(5.0, 1.0 + stage_val / 2000.0 * 4.0))
+            all_mock = {
+                "pilling": round(mock_base * 2) / 2.0,
+                "matting": round(max(1.0, mock_base - 0.5) * 2) / 2.0,
+                "fuzzing": round(min(5.0, mock_base + 0.5) * 2) / 2.0,
+            }
+            grades: Dict[str, Optional[float]] = {g: all_mock[g] for g in active_grades if g in all_mock}
+            log.info("mock predicted grades: %s", grades)
+        else:
+            grades = {}
+            for grade in active_grades:
+                grades[grade] = _predict_grade_from_features(
+                    grade, sample_key, mean_avg, std_avg, max_avg, mode_avg
+                )
 
-        finally:
-            _safe_unlink(temp_single_csv)
-            _safe_unlink(preds_csv)
+        # Write analysis CSV — one per grade, appending prediction result
+        all_stats_with_avg = all_stats + [["Average", mean_avg, std_avg, max_avg, mode_avg]]
+        for grade in active_grades:
+            prediction = grades.get(grade)
+            if prediction is None:
+                continue
+            rows_for_csv = all_stats_with_avg + [
+                ["Grade", prediction, "", "", ""],
+                ["Backend", cfg.BACKEND, "", "", ""],
+            ]
+            analysis_csv = os.path.join(
+                output_dir,
+                f"{sample_number}-{stage_number}-{trial_number}-{grade}-analysis.csv",
+            )
+            _write_csv_with_headers(analysis_csv, list(FEATURE_HEADERS), rows_for_csv)
+            log.info("Analysis saved: %s", analysis_csv)
 
-        if prediction is None:
-            return None
+        # Filter out None predictions before returning
+        return {g: v for g, v in grades.items() if v is not None} or None
 
-        # Write final analysis CSV with all data and metadata
-        analysis_csv = os.path.join(analysis_dir, f"{sample_number}-{stage_number}-{trial_number}-analysis.csv")
-
-        # Add grade and backend info to the stats
-        all_stats.append(["Grade", prediction, "", "", ""])
-        all_stats.append(["Backend", cfg.BACKEND, "", "", ""])
-
-        _write_csv_with_headers(
-            analysis_csv,
-            list(FEATURE_HEADERS),
-            all_stats,
-        )
-
-        print(f"[OK] Analysis saved: {analysis_csv} (backend={cfg.BACKEND})")
-        return prediction
-
-    except Exception as e:
-        print(f"[ERR] analyze_difference_images_and_predict_output failed: {e}")
+    except Exception:
+        log.exception("analyze_difference_images_and_predict_output failed")
         return None
 
 
-def analyze_difference_images(sample_number: str, stage_number: str, trial_number: str, grade_number: Union[str, float], output_dir: str = os.path.join("data", "training_features")) -> Optional[None]:
+def analyze_difference_images(
+    sample_number: str,
+    stage_number: str,
+    trial_number: str,
+    grades: Dict[str, float],
+    output_dir: Optional[str] = None,
+) -> None:
     """
-    Build CSV rows of (Mean, Std, Max, Mode, Grade) feature vectors for ITA-Net training:
-      - per_image_features.csv: one row per difference image (8 per sample)
-      - averaged_features.csv:  one averaged row per sample
-    Either file can be passed to itanet_training.py as the training input.
+    Build CSV feature vectors for ITA-Net training.
+
+    ``grades`` maps each active grade name to its already-validated float value,
+    e.g. ``{"pilling": 2.5, "matting": 3.0}``.  One pair of CSVs is written per
+    entry:
+      - {grade}_per_image_features.csv
+      - {grade}_averaged_features.csv
     """
+    if output_dir is None:
+        output_dir = cfg.TRAINING_FEATURES_DIR
+    if not grades:
+        log.error("No grades provided")
+        return
     try:
-        diff_dir = _get_diff_dir("for_training")
-        out_dir = output_dir
-        ensure_directory(out_dir)
+        diff_dir = cfg.get_difference_dir(cfg.SUFFIX_TRAINING)
+        ensure_directory(output_dir)
 
         if not os.path.exists(diff_dir):
-            print(f"[ERR] Difference pictures directory not found: {diff_dir}")
-            return None
+            log.error("Difference pictures directory not found: %s", diff_dir)
+            return
 
-        # Coerce grade to rounded half-steps as float for dataset consistency
-        try:
-            g = float(str(grade_number).replace(",", "."))
-            g = round(g * 2) / 2.0
-        except ValueError:
-            print(f"[ERR] Invalid grade_number: {grade_number}")
-            return None
-
-        all_stats = _process_difference_images(diff_dir, sample_number, stage_number, trial_number, g)
+        # Feature extraction is the same for all grades — compute once
+        first_grade_val = next(iter(grades.values()))
+        all_stats = _process_difference_images(diff_dir, sample_number, stage_number, trial_number, first_grade_val)
         if not all_stats:
-            print("[WARN] No valid images found for analysis.")
-            return None
+            log.warning("No valid images found for analysis")
+            return
 
         mean_avg, std_avg, max_avg, mode_avg = _calculate_feature_averages(all_stats)
-        avg_stats = [[f"{sample_number}-{stage_number}-{trial_number}", mean_avg, std_avg, max_avg, mode_avg, g]]
+        sample_key = f"{sample_number}-{stage_number}-{trial_number}"
 
-        out_per_image = os.path.join(out_dir, "per_image_features.csv")
-        out_averaged = os.path.join(out_dir, "averaged_features.csv")
+        def _write_grade_csvs(prefix: str, per_image_rows: List[List], grade_val: float) -> None:
+            avg_row = [[sample_key, mean_avg, std_avg, max_avg, mode_avg, grade_val]]
+            out_per = os.path.join(output_dir, f"{prefix}_per_image_features.csv")
+            out_avg = os.path.join(output_dir, f"{prefix}_averaged_features.csv")
+            _write_csv_with_headers(out_per, TRAIN_HEADERS, per_image_rows, append_mode=True)
+            _write_csv_with_headers(out_avg, TRAIN_HEADERS, avg_row, append_mode=True)
+            log.info("%s training rows appended to %s and %s", prefix, out_per, out_avg)
 
-        _write_csv_with_headers(out_per_image, TRAIN_HEADERS, all_stats, append_mode=True)
-        _write_csv_with_headers(out_averaged, TRAIN_HEADERS, avg_stats, append_mode=True)
+        for grade_name, grade_val in grades.items():
+            rows = _restamp_grade(all_stats, grade_val)
+            _write_grade_csvs(grade_name, rows, grade_val)
 
-        print(f"[OK] Training rows appended to {out_per_image} and {out_averaged}")
-
-    except Exception as e:
-        print(f"[ERR] analyze_difference_images failed: {e}")
-        return None
+    except Exception:
+        log.exception("analyze_difference_images failed")
 
 
 def batch_predict_from_csv(csv_path: str, output_path: Optional[str] = None, custom_net_file: Optional[str] = None, custom_trn_file: Optional[str] = None) -> str:
-    """
-    Batch prediction from CSV using the selected backend.
-    For itanet_dll, delegates to predict_from_csv.
-    For tf, runs a TF model if installed and my_model.h5 is present.
-    """
-    return _run_backend_batch(csv_path, output_path, custom_net_file, custom_trn_file)
+    """Batch prediction from CSV using the pilling model (single-grade utility)."""
+    return _run_backend_for_grade("pilling", csv_path, output_path)

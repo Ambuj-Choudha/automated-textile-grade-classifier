@@ -18,6 +18,7 @@ folder (the "run dir") that has `..\\data\\` as a sibling before invoking.
 
 from __future__ import annotations
 from typing import Sequence, Literal, Tuple, Optional
+import logging
 import os
 import re
 import argparse
@@ -26,6 +27,8 @@ import ctypes
 from pathlib import Path
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 DecimalMode = Literal["point", "comma"]
@@ -199,7 +202,7 @@ class ITANetManager:
                  ITANetFiles.TRAIN_INPUT, ITANetFiles.TRAIN_TARGET, ITANetFiles.NET]
         ITANetFileWriter.write_filelist(str(filelist_path), files)
 
-        print(f"[ITANet] Recall session prepared: {len(features_matrix)} samples")
+        log.info("Recall session prepared: %d samples", len(features_matrix))
 
     def run_recall(
         self,
@@ -220,7 +223,7 @@ class ITANetManager:
         output_path = self.run_dir / ITANetFiles.RECALL_OUTPUT
         predictions = ITANetFileReader.read_recall_output(str(output_path))
 
-        print(f"[ITANet] Recall completed: {len(predictions)} predictions")
+        log.info("Recall completed: %d predictions", len(predictions))
         return predictions
 
 
@@ -312,7 +315,7 @@ def predict_from_csv(
         output_path = f"{base}_predictions.csv"
 
     feature_df.to_csv(output_path, index=False)
-    print(f"[ITANet] Wrote predictions ({used_cols}) -> {output_path}")
+    log.info("Wrote predictions (%s) -> %s", used_cols, output_path)
     return output_path
 
 

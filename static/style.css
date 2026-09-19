@@ -1,0 +1,117 @@
+:root {
+  --bg: #001f3f;          /* background */
+  --fg: #f7f9fc;          /* light text */
+  --card: #ffffff;
+
+  --primary: #00B8F0;     /* TexIQ cyan */
+  --primary-600: #05A3D6; /* hover */
+  --primary-700: #0689B5; /* pressed */
+
+  --accent: #FFD33D;      /* TexIQ yellow */
+  --danger: #E23B3B;      /* TexIQ red */
+  --muted: #6b7280;
+
+  --sidebar-bg: #2b2f33;  /* charcoal */
+  --sidebar-fg: #f7f9fc;  /* light text */
+}
+
+/* 1. Base */
+body, section.main {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: 'Segoe UI', sans-serif;
+  padding: 2rem;
+  border-radius: 12px;
+}
+
+/* ENFORCE CONSISTENT HEADING COLORS ACROSS THEMES */
+h1, h2, h3, h4, h5, h6,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+.block-container h1, .block-container h2, .block-container h3 {
+  color: var(--fg) !important;
+}
+
+/* Make Streamlit header/top bar match app background */
+[data-testid="stHeader"] {
+  background: var(--bg) !important;
+  color: var(--fg) !important;
+  box-shadow: none !important;
+}
+[data-testid="stHeader"] * {
+  color: var(--fg) !important;
+}
+
+/* 2. Sidebar */
+.css-1d391kg, [data-testid="stSidebar"] {
+  background-color: var(--sidebar-bg) !important;
+}
+.css-1d391kg .css-qbe2hs, [data-testid="stSidebar"] * {
+  color: var(--sidebar-fg) !important;
+}
+
+/* 3. Buttons */
+.stButton > button {
+  width: 100%;
+  margin: 8px 0;
+  background: var(--primary);
+  color: #0b2536;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  border: none;
+  box-shadow: 0 2px 10px rgba(0, 184, 240, 0.2);
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+.stButton > button:hover {
+  background: var(--primary-600);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 184, 240, 0.28);
+}
+.stButton > button:active {
+  background: var(--primary-700);
+  transform: translateY(0);
+}
+
+/* 4. Custom Alert Boxes (mapped to logo colors) */
+.success-box, .error-box, .info-box {
+  padding: 14px 20px;
+  border-radius: 10px;
+  margin: 16px 0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  color: var(--fg);
+  opacity: 0;
+  transform: translateY(10px);
+  animation: fadeInUp 0.6s ease forwards;
+  background: var(--card);
+}
+.success-box {
+  background: rgba(0, 184, 240, 0.08);
+  border-left: 6px solid var(--primary);
+}
+.error-box {
+  background: rgba(226, 59, 59, 0.10);
+  border-left: 6px solid var(--danger);
+}
+.info-box {
+  background: rgba(255, 211, 61, 0.12);
+  border-left: 6px solid var(--accent);
+}
+.success-box:hover, .error-box:hover, .info-box:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  transform: translateY(5px);
+  transition: all 0.3s ease;
+}
+
+/* 5. Animations */
+@keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
+
+/* 6. Images */
+.stImage > img {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* 7. Links and small accents */
+a, .stMarkdown a { color: var(--primary); }
+hr, .stMarkdown hr { border-color: rgba(0, 0, 0, 0.08); }

@@ -1,31 +1,72 @@
+from typing import Sequence
+
+import streamlit as st
+
+from app import state as S
+
+
+def t(key: str) -> str:
+    """Return the translated string for key using the current session language."""
+    lang = st.session_state.get(S.KEY_LANG, "en")
+    return translations.get(lang, translations["en"]).get(key, key)
+
+
+def validate_grade_translations(grades: Sequence[str]) -> None:
+    """Raise if any active grade is missing its required translation keys.
+
+    A missing key silently falls back to the key name itself in the UI, which
+    looks like broken rendering rather than an error. Running this at boot
+    turns that class of bug into a loud failure.
+    """
+    en = translations["en"]
+    missing = []
+    for grade in grades:
+        for suf in ("_grade_number", "_grade_result"):
+            key = f"{grade}{suf}"
+            if key not in en:
+                missing.append(key)
+        invalid_key = f"invalid_{grade}_grade"
+        if invalid_key not in en:
+            missing.append(invalid_key)
+    if missing:
+        raise RuntimeError(
+            "Missing translation keys for active grades: " + ", ".join(missing)
+        )
+
+
 translations = {
     "en": {
-        "title_grading": "AUTOMATED PILLING GRADE DETECTION",
-        "title_training": "📚 TRAINING FOR AUTOMATED PILLING GRADE DETECTION",
+        "title_grading": "AUTOMATED TEXTILE GRADE DETECTION",
+        "title_training": "📚 TRAINING FOR AUTOMATED TEXTILE GRADE DETECTION",
         "view_images": "🖼️ VIEW IMAGES",
         "settings": "⚙️ Settings",
         "motor_settings": "Motor Settings",
         "motor_ip": "🌐 Motor IP Address",
         "motor_port": "🔌 Motor Port",
-        "directory_settings": "📁 Directory Settings",
-        "base_directory": "📂 Base Directory",
         "select_folder": "📁 Please Select The Folder",
         "enter_filename": "Please Enter PNG File Name",
         "invalid_picture_name": "❌ Picture does not exist! Please enter a valid .png filename.",
         "sample_number": "Sample Number",
         "stage_number": "Assessment Stage",
-        "grade_number": "Grade",
+        "pilling_grade_number": "Pilling Grade",
+        "matting_grade_number": "Matting Grade",
+        "fuzzing_grade_number": "Fuzzing Grade",
+        "invalid_matting_grade": "❌ Invalid matting grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
+        "invalid_fuzzing_grade": "❌ Invalid fuzzing grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
         "load_weight": "Loading Weight",
         "trial_number": "Trial Number",
         "submit": "✅ Submit",
         "status": "Status",
         "results": "📈 Results",
+        "pilling_grade_result": "Pilling Grade",
+        "matting_grade_result": "Matting Grade",
+        "fuzzing_grade_result": "Fuzzing Grade",
         "capture_button": "📷 Capture Images and Calculate the Grades",
         "capture_button_training": "📷 Capture Images",
         "reset_grade": "♻️ Reset Grade",
         "invalid_sample": "❌ Invalid sample number format. Please provide a valid input. e.g. 001, 002, etc.",
         "invalid_stage": "❌ Invalid Assessment Stage format. Please provide a valid input. e.g. 125, 500, etc.",
-        "invalid_grade": "❌ Invalid grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Invalid grade format. Please provide a valid input. e.g. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Invalid Loading Weight format. Please provide a valid input. e.g. 155, 415, etc.",
         "invalid_trial": "❌ Invalid trial number",
         "valid_input": "✅ Input parameters valid",
@@ -37,7 +78,7 @@ translations = {
         "diff_create_success": "✅ Difference images created successfully!",
         "diff_create_spinner": "Creating Difference Images...",
         "histogram_fail": "❌ Histogram analysis failed!",
-        "histogram_success": "✅ Histogram analysis completed! Grade:",
+        "histogram_success": "✅ Histogram analysis completed!",
         "histogram_spinner": "📊 Analyzing Histogram...",
         "available_samples": "Available Samples",
         "mode_selector": "Please Select the Mode:",
@@ -50,37 +91,44 @@ translations = {
         "export_results": "📤 Export The Results",
         "operator_prompt": "👤 Enter Operator Name",
         "name_required": "Please enter your name to continue.",
+        "select_grades": "Active Grades",
+        "grades_required": "⚠️ Select at least one grade.",
         "grading_welcome": "Grading Mode Activated for",
     },
 
     "de": {
-        "title_grading": "AUTOMATISCHE BEWERTUNG DES PILLINGGRADES",
-        "title_training": "📚 TRAINING ZUR AUTOMATISCHEN BEWERTUNG DES PILLINGGRADES",
+        "title_grading": "AUTOMATISCHE TEXTILBEWERTUNG",
+        "title_training": "📚 TRAINING ZUR AUTOMATISCHEN TEXTILBEWERTUNG",
         "view_images": "🖼️ BILDER ANZEIGEN",
         "settings": "⚙️ Einstellungen",
         "motor_settings": "Motor-Einstellungen",
         "motor_ip": "🌐 Motor-IP-Adresse",
         "motor_port": "🔌 Motor-Port",
-        "directory_settings": "📁 Verzeichniseinstellungen",
-        "base_directory": "📂 Basisverzeichnis",
         "select_folder": "📁 Bitte Ordner auswählen",
         "enter_filename": "Bitte PNG-Dateiname eingeben",
         "invalid_picture_name": "❌ Bild existiert nicht! Bitte gültigen .png-Dateinamen eingeben.",
         "sample_number": "Probennummer",
         "stage_number": "Bewertungsstufe",
-        "grade_number": "Bewertung",
+        "pilling_grade_number": "Pilling-Bewertung",
+        "matting_grade_number": "Mattierungs-Bewertung",
+        "fuzzing_grade_number": "Fusseln-Bewertung",
+        "invalid_matting_grade": "❌ Ungültiges Mattierungs-Format. Z. B. 1.5, 2, 2.5, etc.",
+        "invalid_fuzzing_grade": "❌ Ungültiges Fusseln-Format. Z. B. 1.5, 2, 2.5, etc.",
         "load_weight": "Belastungsgewicht",
         "trial_number": "Versuchsnummer",
         "submit": "✅ Absenden",
         "status": "Status",
         "results": "📈 Ergebnisse",
+        "pilling_grade_result": "Pilling-Bewertung",
+        "matting_grade_result": "Mattierungs-Bewertung",
+        "fuzzing_grade_result": "Fusseln-Bewertung",
         "capture_button": "📷 Bilder aufnehmen und Bewertung berechnen",
         "capture_button_training": "📷 Bilder aufnehmen",
         "reset_grade": "♻️ Bewertung zurücksetzen",
-        "invalid_sample": "❌ Ungültiges Probenformat. Z. B. 001, 002, etc.",
-        "invalid_stage": "❌ Ungültige Bewertungsstufe. Z. B. 125, 500, etc.",
-        "invalid_grade": "❌ Ungültiges Bewertungsformat. Z. B. 1.5, 2, 2.5, etc.",
-        "invalid_load": "❌ Ungültiges Gewicht. Z. B. 155, 415, etc.",
+        "invalid_sample": "❌ Ungültiges Probenformat. Z. B. 001, 002, etc.",
+        "invalid_stage": "❌ Ungültige Bewertungsstufe. Z. B. 125, 500, etc.",
+        "invalid_pilling_grade": "❌ Ungültiges Bewertungsformat. Z. B. 1.5, 2, 2.5, etc.",
+        "invalid_load": "❌ Ungültiges Gewicht. Z. B. 155, 415, etc.",
         "invalid_trial": "❌ Ungültige Testnummer",
         "valid_input": "✅ Eingaben sind gültig",
         "reference_not_found": "❌ Referenzbild nicht gefunden! Bitte zuerst aufnehmen.",
@@ -91,7 +139,7 @@ translations = {
         "diff_create_success": "✅ Differenzbilder erfolgreich erstellt!",
         "diff_create_spinner": "Differenzbilder werden erstellt...",
         "histogram_fail": "❌ Histogrammanalyse fehlgeschlagen!",
-        "histogram_success": "✅ Histogramm abgeschlossen! Bewertung:",
+        "histogram_success": "✅ Histogramm abgeschlossen!",
         "histogram_spinner": "📊 Histogramm wird analysiert...",
         "available_samples": "Verfügbare Proben",
         "mode_selector": "Bitte Modus auswählen:",
@@ -104,36 +152,43 @@ translations = {
         "export_results": "📤 Ergebnisse exportieren",
         "operator_prompt": "👤 Namen des Bedieners eingeben",
         "name_required": "Bitte Namen eingeben, um fortzufahren.",
+        "select_grades": "Aktive Bewertungen",
+        "grades_required": "⚠️ Mindestens eine Bewertung auswählen.",
         "grading_welcome": "Bewertungsmodus aktiviert für",
     },
 
     "fr": {
-        "title_grading": "DÉTECTION AUTOMATISÉE DU NIVEAU DE BOULOCHAGE",
-        "title_training": "📚 ENTRAÎNEMENT À LA DÉTECTION AUTOMATISÉE DU NIVEAU DE BOULOCHAGE",
+        "title_grading": "DÉTECTION AUTOMATISÉE DE LA QUALITÉ TEXTILE",
+        "title_training": "📚 ENTRAÎNEMENT À LA DÉTECTION AUTOMATISÉE DE LA QUALITÉ TEXTILE",
         "view_images": "🖼️ VOIR LES IMAGES",
         "settings": "⚙️ Paramètres",
         "motor_settings": "Paramètres du moteur",
         "motor_ip": "🌐 Adresse IP du moteur",
         "motor_port": "🔌 Port du moteur",
-        "directory_settings": "📁 Paramètres du répertoire",
-        "base_directory": "📂 Répertoire de base",
         "select_folder": "📁 Veuillez sélectionner le dossier",
         "enter_filename": "Veuillez entrer le nom du fichier PNG",
         "invalid_picture_name": "❌ Image introuvable ! Veuillez entrer un nom de fichier .png valide.",
         "sample_number": "Numéro d'échantillon",
         "stage_number": "Étape d'évaluation",
-        "grade_number": "Note",
+        "pilling_grade_number": "Note de boulochage",
+        "matting_grade_number": "Note de matage",
+        "fuzzing_grade_number": "Note de peluche",
+        "invalid_matting_grade": "❌ Format de note de matage invalide. Par ex. 1.5, 2, 2.5, etc.",
+        "invalid_fuzzing_grade": "❌ Format de note de peluche invalide. Par ex. 1.5, 2, 2.5, etc.",
         "load_weight": "Poids de charge",
         "trial_number": "Numéro du procès",
         "submit": "✅ Soumettre",
         "status": "Statut",
         "results": "📈 Résultats",
+        "pilling_grade_result": "Note de boulochage",
+        "matting_grade_result": "Note de matage",
+        "fuzzing_grade_result": "Note de peluche",
         "capture_button": "📷 Capturer des images et calculer les notes",
         "capture_button_training": "📷 Capturer des images",
         "reset_grade": "♻️ Réinitialiser la note",
         "invalid_sample": "❌ Format du numéro d'échantillon invalide. Par ex. 001, 002, etc.",
         "invalid_stage": "❌ Format de l'étape invalide. Par ex. 125, 500, etc.",
-        "invalid_grade": "❌ Format de note invalide. Par ex. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Format de note invalide. Par ex. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Format de poids invalide. Par ex. 155, 415, etc.",
         "invalid_trial": "❌ Numéro d'essai invalide",
         "valid_input": "✅ Paramètres valides",
@@ -145,7 +200,7 @@ translations = {
         "diff_create_success": "✅ Images de différence créées avec succès !",
         "diff_create_spinner": "Création des images de différence...",
         "histogram_fail": "❌ Échec de l'analyse de l'histogramme !",
-        "histogram_success": "✅ Analyse de l'histogramme terminée ! Note :",
+        "histogram_success": "✅ Analyse de l'histogramme terminée !",
         "histogram_spinner": "📊 Analyse de l'histogramme...",
         "available_samples": "Échantillons disponibles",
         "mode_selector": "Veuillez sélectionner le mode :",
@@ -158,36 +213,43 @@ translations = {
         "export_results": "📤 Exporter les résultats",
         "operator_prompt": "👤 Entrez le nom de l'opérateur",
         "name_required": "Veuillez entrer votre nom pour continuer.",
+        "select_grades": "Notes actives",
+        "grades_required": "⚠️ Sélectionnez au moins une note.",
         "grading_welcome": "Mode de notation activé pour",
     },
 
     "es": {
-        "title_grading": "DETECCIÓN AUTOMÁTICA DEL GRADO DE PILLING",
-        "title_training": "📚 ENTRENAMIENTO PARA LA DETECCIÓN AUTOMÁTICA DEL GRADO DE PILLING",
+        "title_grading": "DETECCIÓN AUTOMÁTICA DE CALIDAD TEXTIL",
+        "title_training": "📚 ENTRENAMIENTO PARA LA DETECCIÓN AUTOMÁTICA DE CALIDAD TEXTIL",
         "view_images": "🖼️ VER IMÁGENES",
         "settings": "⚙️ Configuración",
         "motor_settings": "Configuración del motor",
         "motor_ip": "🌐 Dirección IP del motor",
         "motor_port": "🔌 Puerto del motor",
-        "directory_settings": "📁 Configuración del directorio",
-        "base_directory": "📂 Directorio base",
         "select_folder": "📁 Por favor seleccione la carpeta",
         "enter_filename": "Por favor ingrese el nombre del archivo PNG",
         "invalid_picture_name": "❌ ¡Imagen no encontrada! Por favor ingrese un nombre de archivo .png válido.",
         "sample_number": "Número de muestra",
         "stage_number": "Etapa de evaluación",
-        "grade_number": "Grado",
+        "pilling_grade_number": "Grado de Pilling",
+        "matting_grade_number": "Grado de Matting",
+        "fuzzing_grade_number": "Grado de Fuzzing",
+        "invalid_matting_grade": "❌ Formato de grado de matting inválido. Ej. 1.5, 2, 2.5, etc.",
+        "invalid_fuzzing_grade": "❌ Formato de grado de fuzzing inválido. Ej. 1.5, 2, 2.5, etc.",
         "load_weight": "Peso de carga",
         "trial_number": "Número de prueba",
         "submit": "✅ Enviar",
         "status": "Estado",
         "results": "📈 Resultados",
+        "pilling_grade_result": "Grado de Pilling",
+        "matting_grade_result": "Grado de Matting",
+        "fuzzing_grade_result": "Grado de Fuzzing",
         "capture_button": "📷 Capturar imágenes y calcular grados",
         "capture_button_training": "📷 Capturar imágenes",
         "reset_grade": "♻️ Restablecer grado",
         "invalid_sample": "❌ Formato de número de muestra inválido. Ej. 001, 002, etc.",
         "invalid_stage": "❌ Formato de etapa inválido. Ej. 125, 500, etc.",
-        "invalid_grade": "❌ Formato de grado inválido. Ej. 1.5, 2, 2.5, etc.",
+        "invalid_pilling_grade": "❌ Formato de grado inválido. Ej. 1.5, 2, 2.5, etc.",
         "invalid_load": "❌ Formato de peso inválido. Ej. 155, 415, etc.",
         "invalid_trial": "❌ Número de prueba no válido",
         "valid_input": "✅ Parámetros válidos",
@@ -199,7 +261,7 @@ translations = {
         "diff_create_success": "✅ ¡Imágenes de diferencia creadas exitosamente!",
         "diff_create_spinner": "Creando imágenes de diferencia...",
         "histogram_fail": "❌ ¡Error en el análisis del histograma!",
-        "histogram_success": "✅ ¡Análisis del histograma completado! Grado:",
+        "histogram_success": "✅ ¡Análisis del histograma completado!",
         "histogram_spinner": "📊 Analizando histograma...",
         "available_samples": "Muestras disponibles",
         "mode_selector": "Por favor seleccione el modo:",
@@ -212,6 +274,8 @@ translations = {
         "export_results": "📤 Exportar resultados",
         "operator_prompt": "👤 Ingrese el nombre del operador",
         "name_required": "Ingrese su nombre para continuar.",
+        "select_grades": "Grados activos",
+        "grades_required": "⚠️ Seleccione al menos un grado.",
         "grading_welcome": "Modo de evaluación activado para",
     }
 }
