@@ -27,13 +27,16 @@ Thumbs.db
 # ITA-Net archive (timestamped .NET + .TRN snapshots; restored manually if needed)
 models/itanet/archive/
 
-# Runtime data (camera captures, training CSVs, ITA-Net inputs)
-data/
+# ITA-Net shared DLL (compiled binary, rebuilt from ITA-net-repo — see docs/itanet/BACKEND_SETUP.md)
+models/itanet/common/*.dll
 
-# itanet data dir: ignore everything except the two filelists the DLL reads
-models/itanet/data/*
-!models/itanet/data/recall.fls
-!models/itanet/data/training.fls
+# Runtime data (camera captures, training CSVs, ITA-Net inputs) — top-level only
+/data/
+
+# Per-grade itanet data dir: ignore everything except the two filelists the DLL reads
+models/itanet/*/data/*
+!models/itanet/*/data/recall.fls
+!models/itanet/*/data/training.fls
 
 # Generated outputs and reports
 output/

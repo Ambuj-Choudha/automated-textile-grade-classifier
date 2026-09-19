@@ -3,7 +3,8 @@ Central config — all paths and toggles live here.
 
 ITA-Net model layout (relative to project root):
   models/itanet/
-    itanet.dll                 shared DLL, loaded by absolute path
+    common/
+      itanet.dll               shared runtime — loaded once, CWD is set per-grade
     {pilling,matting,fuzzing}/
       run/   .NET + .TRN + train/recall .dat files  (CWD when DLL is called)
       data/  recall.fls / training.fls
@@ -31,8 +32,8 @@ ITANET_ROOT = os.path.join("models", "itanet")
 # The three grade networks — each has its own run/ + data/ under ITANET_ROOT
 GRADES = ("pilling", "matting", "fuzzing")
 
-# Shared DLL (loaded by absolute path; CWD is set per-grade at recall/train time)
-DLL_PATH = os.path.join(ITANET_ROOT, "itanet.dll")
+# Shared runtime — one DLL for all grades, CWD is set per-grade at call time
+DLL_PATH = os.path.join(ITANET_ROOT, "common", "itanet.dll")
 
 
 def get_itanet_run_dir(grade: str) -> str:

@@ -258,7 +258,7 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg.MOCK_PREDICTION = True
     cfg.MOCK_HARDWARE = True
     cfg.ADMIN_PASSWORD = "1234"
-    cfg.DLL_PATH = str(tmp_path / "itanet" / "itanet.dll")
+    cfg.DLL_PATH = str(tmp_path / "itanet" / "common" / "itanet.dll")
     cfg.TF_MODEL_PATH = str(tmp_path / "my_model.h5")
     cfg.FEATURE_COLUMNS = ("Mean", "Std", "Max", "Mode")
     cfg.DECIMAL = "point"

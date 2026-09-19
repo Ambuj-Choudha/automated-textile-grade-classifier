@@ -170,9 +170,10 @@ class ITANetFileReader:
 class ITANetManager:
     """High-level manager for ITANet recall.
 
-    ``run_dir`` is the folder the DLL cd's into (holds itanet.dll, .NET, .dat
-    files). ``fls_dir`` is where recall.fls lives — must be a sibling of
-    run_dir so the DLL finds it at ``..\\data\\recall.fls``.
+    ``run_dir`` is the folder the DLL cd's into (holds .NET + .dat files for
+    the active grade). The DLL binary itself lives at ``dll_path`` and is
+    loaded by absolute path. ``fls_dir`` is where recall.fls lives — must be a
+    sibling of run_dir so the DLL finds it at ``..\\data\\recall.fls``.
     """
 
     def __init__(self, run_dir: str, dll_path: str, fls_dir: Optional[str] = None):
@@ -283,9 +284,11 @@ def predict_from_csv(
 ) -> str:
     """Complete prediction pipeline from a CSV file.
 
-    ``data_dir`` is the DLL's run dir (holds itanet.dll, .NET, .dat files).
-    ``fls_dir`` is where recall.fls is written; defaults to ``<data_dir>/../data``
-    to match the DLL's hardcoded `..\\data\\recall.fls` lookup.
+    ``data_dir`` is the DLL's run dir for the active grade (holds .NET + .dat
+    files). The DLL binary is at ``dll_path`` (shared across grades, loaded by
+    absolute path). ``fls_dir`` is where recall.fls is written; defaults to
+    ``<data_dir>/../data`` to match the DLL's hardcoded `..\\data\\recall.fls`
+    lookup.
     """
     feature_df, used_cols = _load_recall_csv(csv_path, feature_cols)
     features_matrix = feature_df.values.tolist()
@@ -332,7 +335,7 @@ def default_fls_dir() -> str:
 
 
 def default_dll_path() -> str:
-    return str(_project_root() / "models" / "itanet" / "run" / "itanet.dll")
+    return str(_project_root() / "models" / "itanet" / "common" / "itanet.dll")
 
 
 def main():

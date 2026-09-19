@@ -36,7 +36,7 @@ All paths and runtime settings live in [app/settings/config.py](../../app/settin
 BACKEND            = "itanet_dll"                    # or "tf" for the TensorFlow path
 ITANET_ROOT        = "models/itanet"
 GRADES             = ("pilling", "matting", "fuzzing")
-DLL_PATH           = "models/itanet/itanet.dll"      # shared DLL, loaded by absolute path
+DLL_PATH           = "models/itanet/common/itanet.dll"  # shared DLL, one binary for all grades
 TF_MODEL_PATH      = "models/tf/my_model.h5"
 FEATURE_COLUMNS    = ("Mean", "Std", "Max", "Mode")
 DECIMAL            = "Point"
@@ -59,7 +59,7 @@ Auto-created at runtime, all `.gitignored` (see the [root README](../../README.m
 - `data/training_features/` — per-grade feature CSVs the training CLI consumes
 - `output/grading_results/` — per-trial, per-grade prediction CSVs (`{sample}-{stage}-{trial}-{grade}-analysis.csv`)
 - `reports/` — exported PDFs
-- `models/itanet/itanet.dll` — shared DLL used by all three grade networks
+- `models/itanet/common/itanet.dll` — shared DLL used by all three grade networks
 - `models/itanet/{grade}/run/` — trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files for that grade (DLL's cwd)
 - `models/itanet/{grade}/data/` — `recall.fls` and `training.fls` (opened by the DLL as `..\data\*.fls`)
 - `models/itanet/archive/{grade}/` — timestamped `.NET` + `.TRN` snapshots taken before each training run
@@ -94,7 +94,7 @@ python app/tests/test_integration.py regression                # CSV format / fo
 
 The default fixture is `output/grading_results/00000-100-1-analysis.csv`. Pass `--csv <path>` to run recall against any CSV with `Image,Mean,Std,Max,Mode` columns — this is how you sanity-check freshly-trained weights against a held-out labeled test set (see [root README §4](../../README.md#4-check-the-trained-model-against-known-samples-recommended) for that workflow). Predictions go to `_test_predictions.csv` at the repo root unless `--output` redirects them.
 
-The runner first prereq-checks `itanet.dll` and `Neuronalesnetz.NET` under `models/itanet/run/` and bails fast if either is missing. Each check prints `PASS` / `FAIL`; non-zero exit on any failure.
+The runner first prereq-checks `itanet.dll` at `models/itanet/common/` and `Neuronalesnetz.NET` under `models/itanet/{grade}/run/`, bailing fast if either is missing. Each check prints `PASS` / `FAIL`; non-zero exit on any failure.
 
 There's also a pure-Python unit suite that doesn't require the DLL:
 
@@ -122,7 +122,7 @@ The same file is also a CLI: `python app/tests/test_pdf_report.py` writes sample
 |---|---|
 | Camera not detected | Check USB, drivers, and Pylon Viewer. |
 | EV3 motor won't connect | Verify SSH credentials and IP in PuTTY. |
-| DLL not found | Confirm `models/itanet/run/itanet.dll` exists; or override `DLL_PATH` in [config.py](../../app/settings/config.py). |
+| DLL not found | Confirm `models/itanet/common/itanet.dll` exists; or override `DLL_PATH` in [config.py](../../app/settings/config.py). |
 | Library install errors | `pip install <package> --upgrade` for the failing package. |
 | Recall predicts the same grade every time | The trained weights may be stale — re-run `itanet_training.py` (see [root README §3](../../README.md#3-train-the-ita-net-model)). |
 
