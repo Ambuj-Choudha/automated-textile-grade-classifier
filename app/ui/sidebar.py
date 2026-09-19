@@ -37,22 +37,27 @@ def render_persistent_sidebar() -> None:
         st.button("🔄 Restart App", key="btn_restart_app", on_click=restart_app_callback)
 
 
-def setup_sidebar():
-    """Settings section shown on capture screens. Returns (motor_ip, motor_port)."""
+def setup_sidebar(mode: str = "grading"):
+    """Settings section shown on capture screens. Returns (motor_ip, motor_port).
+
+    In grading mode, grades without trained weights render as disabled
+    checkboxes with an explanatory tooltip — recall would crash otherwise.
+    In training mode all grades stay selectable (training is how you get
+    them into the trained set).
+    """
     with st.sidebar:
         st.header(t("settings"))
 
         st.subheader(t("select_grades"))
         if S.KEY_SELECTED_GRADES not in st.session_state:
             st.session_state[S.KEY_SELECTED_GRADES] = list(cfg.GRADES)
-        selected_grades = st.multiselect(
-            t("select_grades"),
-            options=list(cfg.GRADES),
-            key=S.KEY_SELECTED_GRADES,
-            format_func=str.capitalize,
-            label_visibility="collapsed",
-        )
-        if not selected_grades:
+
+        if mode == "grading":
+            _render_grading_grade_checkboxes()
+        else:
+            _render_training_grade_multiselect()
+
+        if not st.session_state.get(S.KEY_SELECTED_GRADES):
             st.warning(t("grades_required"))
 
         st.subheader(t("motor_settings"))
@@ -66,3 +71,40 @@ def setup_sidebar():
         st.markdown("---")
 
     return motor_ip, motor_port
+
+
+def _render_grading_grade_checkboxes() -> None:
+    """One checkbox per grade; disabled when the grade's network isn't trained.
+
+    Writes the selection back into KEY_SELECTED_GRADES so downstream code
+    that reads that key (pipeline.run_capture_pipeline) sees the picks.
+    """
+    trained = set(cfg.get_trained_grades())
+    previously_selected = set(st.session_state.get(S.KEY_SELECTED_GRADES, []))
+    selected: list = []
+
+    for grade in cfg.GRADES:
+        is_trained = grade in trained
+        default = grade in previously_selected and is_trained
+        checked = st.checkbox(
+            grade.capitalize(),
+            value=default,
+            key=f"grade_cb_{grade}",
+            disabled=not is_trained,
+            help=None if is_trained else t("grade_not_trained"),
+        )
+        if checked and is_trained:
+            selected.append(grade)
+
+    st.session_state[S.KEY_SELECTED_GRADES] = selected
+
+
+def _render_training_grade_multiselect() -> None:
+    """Multiselect over all three grades — training doesn't gate on trained state."""
+    st.multiselect(
+        t("select_grades"),
+        options=list(cfg.GRADES),
+        key=S.KEY_SELECTED_GRADES,
+        format_func=str.capitalize,
+        label_visibility="collapsed",
+    )

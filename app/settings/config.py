@@ -48,6 +48,24 @@ def get_itanet_archive_dir(grade: str) -> str:
     return os.path.join(ITANET_ROOT, "archive", grade)
 
 
+# A untrained/pristine (topology-only) Neuronalesnetz.NET is ~26 bytes; anything larger is considered trained network weights file
+_PRISTINE_NET_MAX_BYTES = 500
+
+
+def get_trained_grades() -> list:
+    """Return grades whose Neuronalesnetz.NET is weights-bearing.
+
+    Recall requires trained weights — a pristine .NET will crash the DLL.
+    Callers use this to filter user-selected grades before invoking recall.
+    """
+    trained = []
+    for grade in GRADES:
+        net = os.path.join(get_itanet_run_dir(grade), "Neuronalesnetz.NET")
+        if os.path.exists(net) and os.path.getsize(net) > _PRISTINE_NET_MAX_BYTES:
+            trained.append(grade)
+    return trained
+
+
 # ---- Backend selection ----
 
 BACKEND = "itanet_dll"  # use "tf" for TensorFlow
