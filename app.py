@@ -22,16 +22,15 @@ from app.logging_setup import setup_logging
 from app.ui.sidebar import render_persistent_sidebar
 from app.ui.screens import SCREEN_REGISTRY, show_mode_selector
 
-# Public surface re-exports — kept stable for app/tests/test_app.py so that
-# reorganizing implementation under app/ui/ doesn't force test churn.
+# Re-exports referenced as app.NAME by app/tests/test_app.py.
 from app.ui.caching import (  # noqa: F401
-    cached_get_available_samples, cached_check_required_images, load_image_bytes,
+    cached_get_available_samples, cached_check_required_images,
 )
 from app.callbacks import (  # noqa: F401
-    export_results_callback, open_pdf_callback, reset_grade_callback,
-    navigate_to, navigate_to_training_callback, navigate_to_grading_callback,
+    export_results_callback, reset_grade_callback,
+    navigate_to_training_callback, navigate_to_grading_callback,
     submit_login_callback, submit_operator_callback, go_back_callback,
-    clear_messages_callback, restart_app_callback, can_go_back,
+    clear_messages_callback, restart_app_callback,
 )
 from app.ui.views import (  # noqa: F401
     display_grades, display_operation_status,
@@ -39,7 +38,7 @@ from app.ui.views import (  # noqa: F401
 from app.pipeline import (  # noqa: F401
     capture_images_action, create_difference_action,
     run_grading_analysis, run_training_analysis,
-    run_capture_pipeline, capture_callback,
+    capture_callback,
 )
 
 setup_logging()

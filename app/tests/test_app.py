@@ -647,6 +647,34 @@ def test_clear_messages_callback(prepared_env):
         assert key not in st.session_state
 
 
+def test_restart_app_callback_preserves_only_declared_keys(prepared_env):
+    """Every session key not in RESTART_PRESERVED_KEYS is dropped; mode/nav/epoch
+    are reset to their bootstrap values."""
+    app = _import_app_module()
+    st = prepared_env["st"]
+    st.session_state["lang"] = "de"
+    st.session_state["mode"] = "training"
+    st.session_state["nav_stack"] = ["prev"]
+    st.session_state["fs_epoch"] = 42
+    st.session_state["grade"] = {"pilling": 3.0}
+    st.session_state["operator_name"] = "Alice"
+    st.session_state["capture_success"] = "ok"
+    st.session_state["last_sample_number_g"] = "00007"
+
+    app.restart_app_callback()
+
+    # Preserved keys keep their value.
+    assert st.session_state["lang"] == "de"
+    # Reset keys are re-initialized to bootstrap defaults.
+    assert st.session_state["mode"] is None
+    assert st.session_state["nav_stack"] == []
+    assert st.session_state["fs_epoch"] == 0
+    # Everything else is dropped.
+    for dropped in ("grade", "operator_name",
+                    "capture_success", "last_sample_number_g"):
+        assert dropped not in st.session_state
+
+
 # ---------------------------------------------------------------------------
 # cached_* wrappers
 # ---------------------------------------------------------------------------
