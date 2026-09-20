@@ -1,7 +1,7 @@
 # Hands-off first-time setup for Windows.
 #
-# Ensures Python 3.11 is installed (via winget if missing), then creates
-# env\ and installs requirements.txt into it.
+# Ensures a compatible Python (3.11 or newer) is installed (via winget if
+# missing), then creates env\ and installs requirements.txt into it.
 #
 # Run once per machine, from the repo root:
 #
@@ -15,36 +15,57 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $VenvDir  = Join-Path $RepoRoot "env"
 $ReqFile  = Join-Path $RepoRoot "requirements.txt"
 
-function Find-Py311 {
-    # Return @{Cmd=...; Args=...} for the first Python 3.11 we find, else $null.
-    $candidates = @(
-        @{ Cmd = "py";         Args = @("-3.11") },
-        @{ Cmd = "python3.11"; Args = @() },
-        @{ Cmd = "python";     Args = @() }
+$MinMinor = 11   # accept Python 3.$MinMinor or newer (3.12, 3.13, ...)
+
+function Find-Python {
+    # Return @{Cmd=...; Args=...} for the first Python >= 3.$MinMinor we find, else $null.
+    #
+    # Search order:
+    #   1. py launcher (prefer 3.11 explicitly, then latest 3.x)
+    #   2. python3.11 / python3 shims
+    #   3. Known install paths under AppData and ProgramFiles
+    #   4. plain `python` (current shell default)
+    $directPaths = @(
+        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+        "C:\Python311\python.exe",
+        "C:\Program Files\Python311\python.exe",
+        "C:\Program Files (x86)\Python311\python.exe"
     )
+    $candidates = @(
+        @{ Cmd = "py";          Args = @("-3.11") },
+        @{ Cmd = "py";          Args = @("-3") },
+        @{ Cmd = "python3.11";  Args = @() },
+        @{ Cmd = "python3";     Args = @() }
+    )
+    foreach ($p in $directPaths) {
+        if (Test-Path $p) { $candidates += @{ Cmd = $p; Args = @() } }
+    }
+    $candidates += @{ Cmd = "python"; Args = @() }
     foreach ($c in $candidates) {
         if (-not (Get-Command $c.Cmd -ErrorAction SilentlyContinue)) { continue }
         try {
             $out = & $c.Cmd @($c.Args + "--version") 2>&1
-            if ($LASTEXITCODE -eq 0 -and $out -match "Python 3\.11\.") {
-                return $c
+            if ($LASTEXITCODE -eq 0 -and $out -match "Python 3\.(\d+)\.") {
+                if ([int]$Matches[1] -ge $MinMinor) { return $c }
             }
         } catch { }
     }
     return $null
 }
 
-# --- 1. Python 3.11 -----------------------------------------------------------
-$py = Find-Py311
+# --- 1. Python ----------------------------------------------------------------
+$py = Find-Python
 if ($py) {
-    Write-Host "[setup] Python 3.11 already available: $($py.Cmd) $($py.Args -join ' ')"
+    Write-Host "[setup] Compatible Python already available: $($py.Cmd) $($py.Args -join ' ')"
 } else {
-    Write-Host "[setup] Python 3.11 not found. Installing via winget ..."
+    Write-Host "[setup] No Python >= 3.$MinMinor found. Installing 3.11 via winget ..."
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Error @"
 winget is not available on this machine.
-Install Python 3.11 manually from
-  https://www.python.org/downloads/release/python-3110/
+Install Python 3.11 (or newer) manually from
+  https://www.python.org/downloads/
 (tick 'Add Python to PATH'), then re-run .\scripts\setup_env.ps1.
 "@
         exit 1
@@ -53,16 +74,16 @@ Install Python 3.11 manually from
         --accept-source-agreements --accept-package-agreements
 
     # winget updates machine PATH but not this process's PATH — refresh it
-    # so the newly-installed python.exe resolves before Find-Py311 re-runs.
+    # so the newly-installed python.exe resolves before Find-Python re-runs.
     $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-    $py = Find-Py311
+    $py = Find-Python
     if (-not $py) {
-        Write-Error "Python 3.11 install did not register on PATH. Open a new shell and re-run this script."
+        Write-Error "Python install did not register on PATH. Open a new shell and re-run this script."
         exit 1
     }
-    Write-Host "[setup] Python 3.11 installed."
+    Write-Host "[setup] Python installed."
 }
 
 # --- 2. Venv ------------------------------------------------------------------

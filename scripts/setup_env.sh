@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Hands-off first-time setup for Linux / macOS.
 #
-# Ensures Python 3.11 is installed (via apt/dnf/pacman/brew, sudo may be
-# prompted), then creates env/ and installs requirements.txt into it.
+# Ensures a compatible Python (3.11 or newer) is installed (via
+# apt/dnf/pacman/brew, sudo may be prompted), then creates env/ and installs
+# requirements.txt into it.
 #
 # Run once per machine, from the repo root:
 #
@@ -16,10 +17,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$REPO_ROOT/env"
 REQ_FILE="$REPO_ROOT/requirements.txt"
 
-find_py311() {
-    for cmd in python3.11 python3 python; do
+MIN_MINOR=11   # accept Python 3.$MIN_MINOR or newer (3.12, 3.13, ...)
+
+find_python() {
+    # Print the first `cmd` whose Python version is >= 3.$MIN_MINOR.
+    for cmd in python3.11 python3.12 python3.13 python3 python; do
         if command -v "$cmd" >/dev/null 2>&1; then
-            if "$cmd" --version 2>&1 | grep -q "Python 3\.11\."; then
+            minor=$("$cmd" --version 2>&1 \
+                | sed -n 's/^Python 3\.\([0-9][0-9]*\)\..*/\1/p')
+            if [ -n "$minor" ] && [ "$minor" -ge "$MIN_MINOR" ]; then
                 echo "$cmd"
                 return 0
             fi
@@ -67,16 +73,16 @@ install_python311() {
     esac
 }
 
-# --- 1. Python 3.11 -----------------------------------------------------------
-if PY311=$(find_py311); then
-    echo "[setup] Python 3.11 already available: $PY311"
+# --- 1. Python ----------------------------------------------------------------
+if PY=$(find_python); then
+    echo "[setup] Compatible Python already available: $PY"
 else
     install_python311
-    if ! PY311=$(find_py311); then
-        echo "ERROR: Python 3.11 install did not register on PATH. Open a new shell and re-run." >&2
+    if ! PY=$(find_python); then
+        echo "ERROR: Python install did not register on PATH. Open a new shell and re-run." >&2
         exit 1
     fi
-    echo "[setup] Python 3.11 installed: $PY311"
+    echo "[setup] Python installed: $PY"
 fi
 
 # --- 2. Venv ------------------------------------------------------------------
@@ -89,7 +95,7 @@ if [ -d "$VENV_DIR" ]; then
     echo "[setup] Reusing existing venv at $VENV_DIR"
 else
     echo "[setup] Creating venv at $VENV_DIR"
-    "$PY311" -m venv "$VENV_DIR"
+    "$PY" -m venv "$VENV_DIR"
 fi
 
 # --- 3. Install requirements --------------------------------------------------
