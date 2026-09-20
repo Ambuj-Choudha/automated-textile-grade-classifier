@@ -35,9 +35,6 @@ from itanet_recall import (
     SHUFFLE_ON,
     change_directory,
     decimal_to_komma_punkt,
-    default_dll_path,
-    default_fls_dir,
-    default_run_dir,
     format_number,
     load_itanet_dll,
 )

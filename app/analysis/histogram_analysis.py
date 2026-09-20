@@ -210,7 +210,14 @@ def analyze_difference_images_and_predict_output(
     """
     if output_dir is None:
         output_dir = cfg.GRADING_RESULTS_DIR
-    active_grades = list(selected_grades) if selected_grades is not None else list(cfg.GRADES)
+    requested = list(selected_grades) if selected_grades is not None else list(cfg.GRADES)
+
+    # this is a defensive filter against stale session state or direct API calls that bypass the UI.
+    trained = set(cfg.get_trained_grades())
+    active_grades = [g for g in requested if g in trained]
+    if not active_grades:
+        log.error("None of the requested grades have a trained network: %s", requested)
+        return None
     try:
         diff_dir = cfg.get_difference_dir(cfg.SUFFIX_GRADING)
         ensure_directory(output_dir)

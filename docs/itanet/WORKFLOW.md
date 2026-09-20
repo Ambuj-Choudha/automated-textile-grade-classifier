@@ -17,39 +17,42 @@ This document is the integration reference for developers. For the end-user trai
    │  itanet_training.py  (training path)   │  ──►  updated Neuronalesnetz.NET
    │  itanet_recall.py    (recall path)     │  ──►  predicted grade(s)
    └────────────────────┬───────────────────┘
-                        │   chdir into models/itanet/run/
+                        │   chdir into models/itanet/{grade}/run/
                         ▼
-                    itanet.dll
+             itanet.dll  (models/itanet/common/itanet.dll)
                         │   reads ..\data\*.fls, then reads & writes
                         │   the files listed there (in cwd)
                         ▼
           .NET, .TRN, .dat, .fls files
 ```
 
-**Constraint:** the DLL hardcodes `..\data\training.fls` / `..\data\recall.fls` as its entry-point filelist. The caller must `chdir` into a folder that has `..\data\` as a sibling before invoking. The prototype's layout puts the DLL and data files in `models/itanet/run/`, and the filelists in `models/itanet/data/`, so `..\data\` resolves correctly.
+**Constraint:** the DLL hardcodes `..\data\training.fls` / `..\data\recall.fls` as its entry-point filelist. The caller must `chdir` into a folder that has `..\data\` as a sibling before invoking. The prototype's layout puts each grade's data files in `models/itanet/{grade}/run/` and its filelists in `models/itanet/{grade}/data/`, so `..\data\` resolves correctly. The DLL itself is loaded by absolute path from `models/itanet/common/`, so it doesn't need to sit in the cwd.
 
 ## What lives under `models/itanet/`
 
 ```
 models/itanet/
-├── run/                        ← DLL cwd for both training and recall
-│   ├── itanet.dll              ← compiled library (2 exported symbols)
-│   ├── Neuronalesnetz.NET      ← starts as pristine topology; becomes
-│   │                             weights-bearing after training
-│   ├── Neuronalesnetz.TRN      ← training schedule (epochs, learning rate)
-│   ├── TrainingData.dat        ← training features (also used at recall
-│   │                             time to normalize inputs — see below)
-│   ├── TrainingGrades.dat      ← training labels (same reason)
-│   ├── RecallData.dat          ← written each recall
-│   ├── Recall_output.dat       ← written by the DLL each recall
-│   └── (transient .nrm/.nri/.nro/.err/.xcl/.neu files the DLL creates)
-├── data/                       ← sibling of run/ so DLL sees ..\data\*.fls
-│   ├── recall.fls              ← 5 filenames the recall path opens
-│   └── training.fls            ← 4 filenames the training path opens
+├── common/                     ← shared runtime — one binary, all grades
+│   └── itanet.dll              ← compiled library (2 exported symbols)
+├── {pilling,matting,fuzzing}/  ← per-grade network bundle
+│   ├── run/                    ← DLL cwd for this grade's train/recall calls
+│   │   ├── Neuronalesnetz.NET  ← starts as pristine topology; becomes
+│   │   │                         weights-bearing after training
+│   │   ├── Neuronalesnetz.TRN  ← training schedule (epochs, learning rate)
+│   │   ├── TrainingData.dat    ← training features (also used at recall
+│   │   │                         time to normalize inputs — see below)
+│   │   ├── TrainingGrades.dat  ← training labels (same reason)
+│   │   ├── RecallData.dat      ← written each recall
+│   │   ├── Recall_output.dat   ← written by the DLL each recall
+│   │   └── (transient .nrm/.nri/.nro/.err/.xcl/.neu files the DLL creates)
+│   └── data/                   ← sibling of run/ so DLL sees ..\data\*.fls
+│       ├── recall.fls          ← 5 filenames the recall path opens
+│       └── training.fls        ← 4 filenames the training path opens
 └── archive/                    ← timestamped .NET + .TRN snapshots
-    └── <UTC>/
-        ├── Neuronalesnetz.NET
-        └── Neuronalesnetz.TRN
+    └── {grade}/
+        └── <UTC>/
+            ├── Neuronalesnetz.NET
+            └── Neuronalesnetz.TRN
 ```
 
 ### The two `.fls` filelists

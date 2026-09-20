@@ -93,6 +93,9 @@ def _install_dummy_streamlit(monkeypatch):
         def multiselect(self, label, options, default=None, **k):
             return list(default) if default is not None else list(options)
 
+        def checkbox(self, label, value=False, **k):
+            return value
+
         def text_input(self, label, value="", **k): return value
         def number_input(self, label, value=0, **k): return value
         def button(self, label, **k): return self._button_defaults.get(label, False)
@@ -258,7 +261,7 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg.MOCK_PREDICTION = True
     cfg.MOCK_HARDWARE = True
     cfg.ADMIN_PASSWORD = "1234"
-    cfg.DLL_PATH = str(tmp_path / "itanet" / "itanet.dll")
+    cfg.DLL_PATH = str(tmp_path / "itanet" / "common" / "itanet.dll")
     cfg.TF_MODEL_PATH = str(tmp_path / "my_model.h5")
     cfg.FEATURE_COLUMNS = ("Mean", "Std", "Max", "Mode")
     cfg.DECIMAL = "point"
@@ -271,6 +274,8 @@ def _install_dummy_config(monkeypatch, tmp_path: Path):
     cfg.get_itanet_run_dir = lambda grade: str(tmp_path / "itanet" / grade / "run")
     cfg.get_itanet_fls_dir = lambda grade: str(tmp_path / "itanet" / grade / "data")
     cfg.get_itanet_archive_dir = lambda grade: str(tmp_path / "itanet" / "archive" / grade)
+    # Tests assume all three grades are usable; override the file-size check.
+    cfg.get_trained_grades = lambda: list(cfg.GRADES)
     cfg.get_input_dir = lambda suffix: str(tmp_path / "input_pictures" / suffix)
     cfg.get_difference_dir = lambda suffix: str(tmp_path / "difference_pictures" / suffix)
     cfg.make_input_filename = lambda s, st, tr, pos: f"{s}-{st}-{tr}-{pos}.png"

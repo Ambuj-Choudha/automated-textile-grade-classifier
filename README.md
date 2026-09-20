@@ -78,7 +78,7 @@ Options:
 | `--shuffle N` | `1` | `1` = shuffle training patterns, `0` = preserve original order. |
 | `--no-backup` | off | Skip archiving the existing `.NET` + `.TRN`. |
 
-Paths are per-grade: the DLL, `.NET`, `.TRN`, and `.dat` files live in `models/itanet/{grade}/run/`; the `.fls` filelists in `models/itanet/{grade}/data/`; archives in `models/itanet/archive/{grade}/`. The shared DLL sits at `models/itanet/itanet.dll`. Override these in [`app/settings/config.py`](app/settings/config.py) if you need a non-standard layout.
+Paths are per-grade: the `.NET`, `.TRN`, and `.dat` files live in `models/itanet/{grade}/run/`; the `.fls` filelists in `models/itanet/{grade}/data/`; archives in `models/itanet/archive/{grade}/`. The shared DLL sits at `models/itanet/common/itanet.dll` (one binary for all grades). Override these in [`app/settings/config.py`](app/settings/config.py) if you need a non-standard layout.
 
 If you want to check the trained model against known samples (recall)
 
@@ -114,7 +114,7 @@ All folders below are auto-created at runtime and `.gitignored` — they hold lo
 | `data/training_features/` | Per-grade feature CSVs (Mean/Std/Max/Mode + Grade) — inputs to `itanet_training.py` |
 | `output/grading_results/` | Per-trial, per-grade prediction CSVs (`{sample}-{stage}-{trial}-{grade}-analysis.csv`) |
 | `reports/` | Exported PDF reports |
-| `models/itanet/itanet.dll` | Shared DLL (loaded once, used by all three grade networks) |
+| `models/itanet/common/itanet.dll` | Shared DLL (loaded once, used by all three grade networks) |
 | `models/itanet/{grade}/run/` | Trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files for that grade (the DLL's cwd at call time) |
 | `models/itanet/{grade}/data/` | `recall.fls` and `training.fls` — filelists the DLL opens as `..\data\*.fls` from the run dir |
 | `models/itanet/archive/{grade}/` | Timestamped backups of `Neuronalesnetz.NET` + `.TRN` from before each training run |

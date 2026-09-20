@@ -170,9 +170,10 @@ class ITANetFileReader:
 class ITANetManager:
     """High-level manager for ITANet recall.
 
-    ``run_dir`` is the folder the DLL cd's into (holds itanet.dll, .NET, .dat
-    files). ``fls_dir`` is where recall.fls lives — must be a sibling of
-    run_dir so the DLL finds it at ``..\\data\\recall.fls``.
+    ``run_dir`` is the folder the DLL cd's into (holds .NET + .dat files for
+    the active grade). The DLL binary itself lives at ``dll_path`` and is
+    loaded by absolute path. ``fls_dir`` is where recall.fls lives — must be a
+    sibling of run_dir so the DLL finds it at ``..\\data\\recall.fls``.
     """
 
     def __init__(self, run_dir: str, dll_path: str, fls_dir: Optional[str] = None):
@@ -283,9 +284,11 @@ def predict_from_csv(
 ) -> str:
     """Complete prediction pipeline from a CSV file.
 
-    ``data_dir`` is the DLL's run dir (holds itanet.dll, .NET, .dat files).
-    ``fls_dir`` is where recall.fls is written; defaults to ``<data_dir>/../data``
-    to match the DLL's hardcoded `..\\data\\recall.fls` lookup.
+    ``data_dir`` is the DLL's run dir for the active grade (holds .NET + .dat
+    files). The DLL binary is at ``dll_path`` (shared across grades, loaded by
+    absolute path). ``fls_dir`` is where recall.fls is written; defaults to
+    ``<data_dir>/../data`` to match the DLL's hardcoded `..\\data\\recall.fls`
+    lookup.
     """
     feature_df, used_cols = _load_recall_csv(csv_path, feature_cols)
     features_matrix = feature_df.values.tolist()
@@ -323,24 +326,27 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def default_run_dir() -> str:
-    return str(_project_root() / "models" / "itanet" / "run")
-
-
-def default_fls_dir() -> str:
-    return str(_project_root() / "models" / "itanet" / "data")
-
-
 def default_dll_path() -> str:
-    return str(_project_root() / "models" / "itanet" / "run" / "itanet.dll")
+    return str(_project_root() / "models" / "itanet" / "common" / "itanet.dll")
+
+
+def _grade_run_dir(grade: str) -> str:
+    return str(_project_root() / "models" / "itanet" / grade / "run")
+
+
+def _grade_fls_dir(grade: str) -> str:
+    return str(_project_root() / "models" / "itanet" / grade / "data")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Run ITA-Net recall on a CSV of features. "
-                    "Reads/writes under models/itanet/ (run/ + data/).",
+                    "Reads/writes under models/itanet/<grade>/ (run/ + data/).",
     )
     parser.add_argument("csv_path", help="Input CSV (e.g. output/grading_results/*.csv).")
+    parser.add_argument("--grade", required=True,
+                        choices=["pilling", "matting", "fuzzing"],
+                        help="Which grade network to use (required — recall is per-grade).")
     parser.add_argument("--output", default=None, help="Output CSV path.")
     parser.add_argument("--feature-cols", nargs="+", default=None,
                         help="Explicit feature column names (default: auto-detect numeric).")
@@ -360,13 +366,13 @@ def main():
 
     predict_from_csv(
         csv_path=args.csv_path,
-        data_dir=default_run_dir(),
+        data_dir=_grade_run_dir(args.grade),
         dll_path=default_dll_path(),
         output_path=args.output,
         feature_cols=args.feature_cols,
         clip_range=None if args.no_clip else (1.0, 5.0),
         decimal=args.decimal,
-        fls_dir=default_fls_dir(),
+        fls_dir=_grade_fls_dir(args.grade),
         net_type=args.net_type,
         shuffle=args.shuffle,
     )

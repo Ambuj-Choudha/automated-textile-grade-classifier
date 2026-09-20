@@ -93,6 +93,7 @@ translations = {
         "name_required": "Please enter your name to continue.",
         "select_grades": "Active Grades",
         "grades_required": "⚠️ Select at least one grade.",
+        "grade_not_trained": "Network not trained for this grade yet.",
         "grading_welcome": "Grading Mode Activated for",
     },
 
@@ -154,6 +155,7 @@ translations = {
         "name_required": "Bitte Namen eingeben, um fortzufahren.",
         "select_grades": "Aktive Bewertungen",
         "grades_required": "⚠️ Mindestens eine Bewertung auswählen.",
+        "grade_not_trained": "Netzwerk für diese Bewertung noch nicht trainiert.",
         "grading_welcome": "Bewertungsmodus aktiviert für",
     },
 
@@ -215,6 +217,7 @@ translations = {
         "name_required": "Veuillez entrer votre nom pour continuer.",
         "select_grades": "Notes actives",
         "grades_required": "⚠️ Sélectionnez au moins une note.",
+        "grade_not_trained": "Réseau non entraîné pour cette note.",
         "grading_welcome": "Mode de notation activé pour",
     },
 
@@ -276,6 +279,7 @@ translations = {
         "name_required": "Ingrese su nombre para continuar.",
         "select_grades": "Grados activos",
         "grades_required": "⚠️ Seleccione al menos un grado.",
+        "grade_not_trained": "Red no entrenada para este grado.",
         "grading_welcome": "Modo de evaluación activado para",
     }
 }

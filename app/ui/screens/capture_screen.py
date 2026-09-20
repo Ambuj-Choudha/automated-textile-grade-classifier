@@ -205,7 +205,7 @@ def _render_mode_screen(mode: str, title_key: str, back_key: str) -> None:
             st.button("← Back", key=back_key, on_click=go_back_callback)
     st.markdown("---")
 
-    motor_ip, motor_port = setup_sidebar()
+    motor_ip, motor_port = setup_sidebar(mode=mode)
     show_image_viewer()
     st.markdown("---")
 

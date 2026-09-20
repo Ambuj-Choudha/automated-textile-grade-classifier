@@ -40,9 +40,9 @@ from itanet_recall import (  # noqa: E402
     _load_recall_csv,
     change_directory,
     decimal_to_komma_punkt,
+    _grade_fls_dir,
+    _grade_run_dir,
     default_dll_path,
-    default_fls_dir,
-    default_run_dir,
     format_number,
     load_itanet_dll,
     predict_from_csv,
@@ -548,20 +548,24 @@ class TestPredictFromCsvApi:
 
 class TestDefaultPaths:
     def test_defaults_are_absolute(self):
-        # These get used as argparse defaults — must be usable from any cwd.
-        assert Path(default_run_dir()).is_absolute()
-        assert Path(default_fls_dir()).is_absolute()
+        # These get used as CLI argument resolvers — must be usable from any cwd.
+        assert Path(_grade_run_dir("pilling")).is_absolute()
+        assert Path(_grade_fls_dir("pilling")).is_absolute()
         assert Path(default_dll_path()).is_absolute()
 
     def test_run_and_fls_are_siblings(self):
-        """The DLL hardcodes ``..\\data\\recall.fls`` relative to CWD, so the
-        default run/fls dirs must be siblings — one level up shares a parent."""
-        run = Path(default_run_dir())
-        fls = Path(default_fls_dir())
-        assert run.parent == fls.parent
+        """The DLL hardcodes ``..\\data\\recall.fls`` relative to CWD, so each
+        grade's run/fls dirs must be siblings — one level up shares a parent."""
+        for grade in ("pilling", "matting", "fuzzing"):
+            run = Path(_grade_run_dir(grade))
+            fls = Path(_grade_fls_dir(grade))
+            assert run.parent == fls.parent
 
-    def test_default_dll_is_inside_run(self):
-        assert Path(default_dll_path()).parent == Path(default_run_dir())
+    def test_default_dll_is_shared_common(self):
+        """The DLL lives in models/itanet/common/, not inside any grade's run/."""
+        dll = Path(default_dll_path())
+        assert dll.parent.name == "common"
+        assert dll.parent.parent.name == "itanet"
 
 
 # --------------------------------------------------------------------------- #
