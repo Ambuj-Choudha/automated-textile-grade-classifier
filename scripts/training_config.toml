@@ -1,0 +1,27 @@
+# ITA-Net training config — read by `python scripts/train.py`.
+#
+# Each [<grade>] section makes that grade trainable. Comment out a grade you
+# don't want touched. Paths are relative to the project root.
+#
+# net_type:  1 = fresh weights (requires a pristine .NET, ~24 bytes)
+#            2 = continue training from the current weights
+# decimal:   "comma" or "point" — separator written into TrainingData.dat
+# shuffle:   1 = shuffle training patterns, 0 = keep original order
+
+[pilling]
+csv = "data/training_features/pilling_averaged_features.csv"
+net_type = 1
+decimal = "comma"
+shuffle = 1
+
+[matting]
+csv = "data/training_features/matting_averaged_features.csv"
+net_type = 1
+decimal = "comma"
+shuffle = 1
+
+[fuzzing]
+csv = "data/training_features/fuzzing_averaged_features.csv"
+net_type = 1
+decimal = "comma"
+shuffle = 1
