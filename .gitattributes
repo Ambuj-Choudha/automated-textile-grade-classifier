@@ -1,0 +1,10 @@
+# DLL-adjacent model files — treat as binary so git never rewrites line endings.
+# The ITA-Net C library reads these directly; CRLF conversion would corrupt them
+# or cause spurious "modified" noise after reset_network.py restores pristine copies.
+models/itanet/**/*.NET  binary
+models/itanet/**/*.TRN  binary
+models/itanet/**/*.dat  binary
+models/itanet/**/*.fls  binary
+models/itanet/**/*.nrm  binary
+models/itanet/**/*.nri  binary
+models/tf/*.h5          binary
