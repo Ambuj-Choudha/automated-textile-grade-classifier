@@ -5,7 +5,7 @@ Three responsibilities live here:
   2. Boot-time CSS + cache reset.
   3. Screen dispatch based on st.session_state.mode.
 
-Everything else lives under app/ui/. See docs/app/APP.md for the folder map.
+Everything else lives under app/ui/. See docs/APP.md for the folder map.
 """
 import streamlit as st
 
