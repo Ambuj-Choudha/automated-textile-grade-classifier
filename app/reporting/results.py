@@ -106,11 +106,16 @@ def export_results(
                         sample_number, cfg.GRADING_RESULTS_DIR)
             return False
 
-        # Pilling drives the primary results_by_rubs; the other grades are
-        # optional columns. If pilling has no data, fall back to whichever
-        # grade did — union the rub levels so no row is dropped.
+        # Union all rub levels across the grades that produced data so no row
+        # is dropped from the table.
         all_rubs = sorted({rub for m in per_grade_maps.values() for rub in m})
-        results_by_rubs = per_grade_maps.get("pilling") or {}
+
+        # generate_pilling_report requires results_by_rubs (rendered as the
+        # first table column). If pilling has no data, pick the next grade
+        # that does — otherwise the PDF shows a full "Pilling" column of NAs
+        # even when matting/fuzzing have real values.
+        primary_grade = next((g for g in cfg.GRADES if g in per_grade_maps), None)
+        results_by_rubs = per_grade_maps.get(primary_grade, {})
         for rub in all_rubs:
             results_by_rubs.setdefault(rub, ["NA", "NA", "NA", "NA"])
 
@@ -119,14 +124,20 @@ def export_results(
         clean_name = "".join(c for c in operator_name if c.isalnum() or c in ("-", "_")).strip() or "Unknown"
         pdf_filepath = os.path.join(reports_dir, f"{sample_number}-{clean_name}-report.pdf")
 
+        # Only pass the secondary grade dicts when the primary isn't already
+        # that grade — otherwise we'd render the same column twice.
+        secondary_map = {g: per_grade_maps.get(g) for g in cfg.GRADES if g != primary_grade}
+
         ok = generate_pilling_report(
             sample_number=sample_number,
             stage_number=stage_number,
             load_weight_g=load_weight,
             operator_name=operator_name,
             results_by_rubs=results_by_rubs,
-            matting_by_rubs=per_grade_maps.get("matting"),
-            fuzzing_by_rubs=per_grade_maps.get("fuzzing"),
+            primary_grade_label=primary_grade.capitalize() if primary_grade else "Pilling",
+            matting_by_rubs=secondary_map.get("matting"),
+            fuzzing_by_rubs=secondary_map.get("fuzzing"),
+            pilling_by_rubs=secondary_map.get("pilling"),
             abradant="Similar Fabric",
             output_path=pdf_filepath,
             rub_levels=all_rubs,

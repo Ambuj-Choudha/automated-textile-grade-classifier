@@ -1,135 +1,168 @@
 # Automated Textile Grade Classifier
 
-A prototype for automating textile quality assessment. It captures images on a Basler camera, compares them against a stage-0 reference shot, and predicts one or more grades — **pilling**, **matting**, and **fuzzing** (each 1.0 – 5.0 in 0.5 steps) — using either a trained neural network per grade (ITA-Net) or a TensorFlow-based deep learning model.
+A tool for grading textile samples. A camera takes photos of the sample, compares them to a clean reference photo, and predicts three grades — **pilling**, **matting**, and **fuzzing** (each from 1.0 to 5.0 in 0.5 steps) — using one trained neural network (ITA-Net) per grade.
 
-This document walks through the full workflow end to end: 
-**install → collect labeled samples → train the model → check the trained model → grade new samples**. 
-Follow the sections in order the first time around.
+## Who is this document for?
 
-> Need more detail later? **[docs/app/APP.md](docs/app/APP.md)** covers app internals for developers. **[docs/itanet/WORKFLOW.md](docs/itanet/WORKFLOW.md)** covers ITA-Net integration internals (DLL contract, file formats, recall data flow).
+This project has three kinds of users. Follow the path that matches you.
 
-## 1. Install
+| Role | What you do | Where to start |
+|---|---|---|
+| **Operator** | Use the app to take photos and read grades. No setup on your side. | Watch the walkthrough video: _[TODO: add link]_ |
+| **Model owner** | Set up the machine, train the networks, check the results, then hand the app to the operator. | **This README, steps 1 – 7 below.** |
+| **Developer** | Add features or change how the app works. | [docs/APP.md](docs/APP.md) for the app, [docs/INTEGRATION.md](docs/INTEGRATION.md) for the DLL contract. |
 
-You need **Python 3.11** on Windows. Install it from the [official Python site](https://www.python.org/downloads/release/python-3100/) — make sure to tick **"Add Python to PATH"** during setup — or use winget:
+The steps below are for the **model owner**.
 
-```bash
-winget install --id Python.Python.3.11 -e
-python --version    # should print Python 3.11.x
+---
+
+## 1. First-time environment setup
+
+One command, hands-off:
+
+```powershell
+.\scripts\setup_env.ps1     # Windows (PowerShell)
 ```
 
-Then, from this project folder:
-
 ```bash
-py -3.11 -m venv env
-env\Scripts\activate                  # Command Prompt
-# or:  source env/Scripts/activate     (Git Bash / MINGW)
-
-pip install -r requirements.txt
+./scripts/setup_env.sh      # Linux / macOS
 ```
 
-That's it. Verify with `python --version` — you should still see Python 3.11.x while the environment is active.
+Both scripts check for Python 3.11 → install it if missing (winget on Windows; apt / dnf / pacman / brew on Linux/macOS, sudo may be asked) → create `env\` → install [`requirements.txt`](requirements.txt). Safe to run again — it will skip steps that are already done.
 
-> If you don't have the Basler camera or the LEGO EV3 motor handy, the app still runs in software-only mode — see [docs/app/APP.md](docs/app/APP.md#hardware-setup) for the hardware details when you're ready to wire them up.
+## 2. Activate the environment (every new terminal)
 
-## 2. Collect labeled training samples
-
-Launch the app:
+```powershell
+. scripts\activate.ps1        # PowerShell — the dot at the start matters
+```
 
 ```bash
+source scripts/activate.sh    # Git Bash / macOS / Linux
+```
+
+The dot (or `source`) is needed. Without it, your terminal will not stay activated.
+
+## 3. Collect labeled training samples
+
+Start the app to take photos of samples with known grades (skip this if you already have the CSV files):
+
+```powershell
 python -m streamlit run app.py
 ```
 
-It opens at <http://localhost:8501>.
+In the app: pick **Training Mode**, log in (default password `1234`), fill in the sample details and the known grade(s), then click **Capture**. Each capture takes 8 photos and writes numbers into two CSV files per grade in `data/training_features/`:
 
-1. Pick **Training Mode** and log in (default password: `1234`).
-2. Enter operator name, sample number, stage (rubs), trial number, and the **known grades** (1.0 – 5.0 in 0.5 steps) for each active grade type (pilling / matting / fuzzing).
-3. Click **Capture**. The app captures 8 rotational images, builds difference images against the stage-0 reference, extracts a feature vector (`Mean`, `Std`, `Max`, `Mode`), and appends a row to a pair of CSVs *per active grade* under `data/training_features/`:
-   - `{grade}_per_image_features.csv` — one row per difference image (8 rows per sample)
-   - `{grade}_averaged_features.csv` — one averaged row per sample
-4. Repeat for as many labeled samples as you can. More variety across grades and rub counts means a better model.
+- `{grade}_per_image_features.csv` — one line per photo (8 lines per sample)
+- `{grade}_averaged_features.csv` — one line per sample (**use this file for training**)
 
-You can quit and resume later — the CSVs are appended on every capture.
+Repeat with as many samples as you can. More samples → better predictions.
 
-## 3. Train the ITA-Net model
+## 4. Set up the training
 
-Once you've collected enough training samples, run training from the command line (with the environment activated). Each grade has its own network — train them one at a time with `--grade`:
+Open [`scripts/training_config.toml`](scripts/training_config.toml). List one section per grade you want to train, so the CSV file, the grade, and the settings are written in one place — no mistakes at the command line:
 
-```bash
-python itanet_training.py data\training_features\pilling_averaged_features.csv --grade pilling
-python itanet_training.py data\training_features\matting_averaged_features.csv --grade matting
-python itanet_training.py data\training_features\fuzzing_averaged_features.csv --grade fuzzing
+```toml
+[pilling]
+csv = "data/training_features/pilling_averaged_features.csv"
+net_type = 1        # 1 = start fresh (empty network), 2 = keep training the current one
+decimal = "comma"
+shuffle = 1
 ```
 
-What happens:
+Delete or comment out a grade's section to leave that network alone.
 
-1. The CSV is converted into the binary `.dat` files the DLL expects (`TrainingData.dat`, `TrainingGrades.dat` in `models/itanet/run/`).
-2. The existing `Neuronalesnetz.NET` (and its `.TRN`) are archived to `models/itanet/archive/<UTC timestamp>/` (safety backup — copy them back if a run goes bad).
-3. The DLL runs training and rewrites `models/itanet/run/Neuronalesnetz.NET` in place with the trained weights (the file was topology-only going in; it's weights-bearing coming out).
-4. During grading, the new `.NET` is picked up automatically.
+## 5. Train
 
-> **Re-training from scratch.** `--net-type 1` (the default) requires a pristine, topology-only `.NET`. If your current `.NET` has already been trained (>500 bytes), the script will stop with an error — restore a pristine copy from `models/itanet/archive/` first, or pass `--net-type 2` to continue training from the current weights.
+Train every grade in the config file:
 
-Options:
-
-| Flag | Default | Effect |
-|---|---|---|
-| `--net-type N` | `1` | `1` = fresh weights (needs pristine `.NET`), `2` = continue training from current weights. |
-| `--decimal MODE` | `comma` | `comma` or `point` — decimal separator written into the `.dat` files; the DLL's `komma_punkt` flag is derived from this. |
-| `--shuffle N` | `1` | `1` = shuffle training patterns, `0` = preserve original order. |
-| `--no-backup` | off | Skip archiving the existing `.NET` + `.TRN`. |
-
-Paths are per-grade: the `.NET`, `.TRN`, and `.dat` files live in `models/itanet/{grade}/run/`; the `.fls` filelists in `models/itanet/{grade}/data/`; archives in `models/itanet/archive/{grade}/`. The shared DLL sits at `models/itanet/common/itanet.dll` (one binary for all grades). Override these in [`app/settings/config.py`](app/settings/config.py) if you need a non-standard layout.
-
-If you want to check the trained model against known samples (recall)
-
-### Recall without Streamlit
-
-Run recall on any analysis CSV directly
-
-```bash
-python itanet_recall.py output\grading_results\<sample>-<stage>-<trial>-<grade>-analysis.csv
+```powershell
+python scripts\train.py
 ```
 
-Summary rows (`Average`, `Grade`, `Backend`) at the bottom are filtered out automatically.
+Or one or two grades at a time:
 
-## 4. Grade new samples interactively using Streamlit UI 
+```powershell
+python scripts\train.py --grade pilling
+python scripts\train.py --grade pilling matting
+```
 
-In the app, pick **Grading Mode**:
+The script checks every grade first. If a CSV file is missing, or the network is not in the expected state (empty for `net_type=1`, trained for `net_type=2`), it stops before starting. Before writing new weights, the old network is copied into `models\itanet\archive\<grade>\<UTC>\`, so you can always go back.
 
-1. Enter operator name, sample number, stage, trial, and load weight.
-2. Pick the active grades in the sidebar (any subset of pilling / matting / fuzzing).
-3. Click **Capture** — the app takes 8 images, generates the features (Mean/Std/Max/Mode), calls each selected grade's ITA-Net for prediction, and shows the grades on screen.
-4. Click **Export Results** to save a combined PDF report under `reports/` — one column-group per grade that has data.
+## 6. Check the result
 
-Per-trial analysis statistics are saved in `output/grading_results/` (one CSV per `<sample>-<stage>-<trial>-<grade>`), so you can always re-inspect the raw features each ITA-Net model used.
+Test a trained network without the app:
+
+```powershell
+python itanet_recall.py output\grading_results\<sample>-<stage>-<trial>-<grade>-analysis.csv --grade <grade>
+```
+
+Or run the full test (needs a trained network for the chosen grade):
+
+```powershell
+python app\tests\test_integration.py all --grade pilling
+```
+
+## 7. Fix a bad training run
+
+If the network gives bad results, or you want to start training over:
+
+```powershell
+python scripts\reset_network.py --grade pilling      # or --all
+```
+
+This puts the empty (untrained) network files back in place. To go back to an earlier trained network instead:
+
+```powershell
+python scripts\reset_network.py --grade pilling --list
+python scripts\reset_network.py --grade pilling --from 20260901T120000Z
+```
+
+---
+
+## Giving the app to the operator
+
+When every grade is trained and checked:
+
+1. Change these two lines in [`app/settings/config.py`](app/settings/config.py):
+   ```python
+   MOCK_HARDWARE = False       # use the real camera and motor
+   MOCK_PREDICTION = False     # use the trained network (not fake grades)
+   ```
+2. Change `ADMIN_PASSWORD` if you want.
+3. Start the app: `python -m streamlit run app.py`. In **Grading Mode**, only trained grades will be selectable.
+
+The operator can export a PDF report from the app (saved in `reports/`). Raw per-trial data is saved in `output/grading_results/`.
 
 ## Folder layout
 
-All folders below are auto-created at runtime and `.gitignored` — they hold local artifacts only.
+These folders are created when the app runs and are not committed to git.
 
-| Folder | What's in it |
+| Folder | What is in it |
 |---|---|
-| `data/input_pictures/{for_grading,for_training}/` | Raw 8-image capture sets from the camera (stage-0 is the reference; higher stages are the pilled samples) |
-| `data/difference_pictures/{for_grading,for_training}/` | Generated difference images (current vs. stage-0 reference) |
-| `data/training_features/` | Per-grade feature CSVs (Mean/Std/Max/Mode + Grade) — inputs to `itanet_training.py` |
-| `output/grading_results/` | Per-trial, per-grade prediction CSVs (`{sample}-{stage}-{trial}-{grade}-analysis.csv`) |
-| `reports/` | Exported PDF reports |
-| `models/itanet/common/itanet.dll` | Shared DLL (loaded once, used by all three grade networks) |
-| `models/itanet/{grade}/run/` | Trained `Neuronalesnetz.NET`, `.TRN`, and training/recall `.dat` files for that grade (the DLL's cwd at call time) |
-| `models/itanet/{grade}/data/` | `recall.fls` and `training.fls` — filelists the DLL opens as `..\data\*.fls` from the run dir |
-| `models/itanet/archive/{grade}/` | Timestamped backups of `Neuronalesnetz.NET` + `.TRN` from before each training run |
-| `models/tf/` | TensorFlow backend model (alternate prediction path) |
+| `data/input_pictures/{for_grading,for_training}/` | Photos taken by the camera |
+| `data/difference_pictures/{for_grading,for_training}/` | Difference images (photo vs. the clean reference) |
+| `data/training_features/` | Feature CSV files per grade (used as input for training) |
+| `output/grading_results/` | Per-trial prediction CSV files |
+| `reports/` | PDF reports exported from the app |
+| `models/itanet/common/itanet.dll` | The shared DLL (used by all three grades) |
+| `models/itanet/{grade}/run/` | The `.NET`, `.TRN`, and data files for one grade |
+| `models/itanet/{grade}/data/` | The `recall.fls` and `training.fls` file lists |
+| `models/itanet/archive/{grade}/` | Old `.NET` + `.TRN` copies from before each training run |
+| `models/tf/` | TensorFlow model (a different prediction backend) |
 
-The only scripts at the root you would run:
+## List of scripts
 
-- **`app.py`** — `python -m streamlit run app.py` to launch the app.
-- **`itanet_training.py`** — train the model from a labeled feature CSV.
----
+| Script | What it does |
+|---|---|
+| [`scripts/setup_env.ps1`](scripts/setup_env.ps1) / [`.sh`](scripts/setup_env.sh) | Install Python 3.11 (if missing), create `env\`, install `requirements.txt`. Run once per machine. |
+| [`scripts/activate.ps1`](scripts/activate.ps1) / [`.sh`](scripts/activate.sh) | Activate the environment in the current terminal. |
+| [`scripts/training_config.toml`](scripts/training_config.toml) | Training settings for each grade. Edit before training. |
+| [`scripts/train.py`](scripts/train.py) | Train one, two, or all grades using the settings file. |
+| [`scripts/reset_network.py`](scripts/reset_network.py) | Reset a grade's network back to empty, or to an earlier saved copy. |
 
-## Need more detail?
+## More reading
 
-- **Extending the app's UI or features** → [docs/app/APP.md](docs/app/APP.md)
-- **ITA-Net integration internals (DLL contract, file formats, recall data flow)** → [docs/itanet/WORKFLOW.md](docs/itanet/WORKFLOW.md)
-- **Rebuilding the model bundle from C source** → [docs/itanet/BACKEND_SETUP.md](docs/itanet/BACKEND_SETUP.md)
+- **How the app is wired together** → [docs/APP.md](docs/APP.md)
+- **How the app talks to the ITA-Net DLL** → [docs/INTEGRATION.md](docs/INTEGRATION.md)
 
-Issues and feedback: open a ticket at <https://github.com/Ambuj-Choudha/automated-textile-grade-classifier>.
+Questions or problems: <https://github.com/Ambuj-Choudha/automated-textile-grade-classifier/issues>

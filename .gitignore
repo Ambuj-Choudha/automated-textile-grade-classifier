@@ -27,7 +27,7 @@ Thumbs.db
 # ITA-Net archive (timestamped .NET + .TRN snapshots; restored manually if needed)
 models/itanet/archive/
 
-# ITA-Net shared DLL (compiled binary, rebuilt from ITA-net-repo — see docs/itanet/BACKEND_SETUP.md)
+# ITA-Net shared DLL (compiled binary, rebuilt from ITA-net-repo — see docs/INTEGRATION.md)
 models/itanet/common/*.dll
 
 # Runtime data (camera captures, training CSVs, ITA-Net inputs) — top-level only

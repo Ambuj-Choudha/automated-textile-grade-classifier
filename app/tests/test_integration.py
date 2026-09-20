@@ -3,10 +3,14 @@
 Quick way to verify the train/recall pipeline without launching Streamlit.
 Run from the repo root:
 
-    python app/tests/test_integration.py recall                 # recall on a default fixture CSV
-    python app/tests/test_integration.py recall --csv <path>    # recall on any CSV
-    python app/tests/test_integration.py regression             # exercise the 3 bug-prone shapes
-    python app/tests/test_integration.py all                    # both
+    python app/tests/test_integration.py recall --grade <grade>              # recall on a default fixture CSV
+    python app/tests/test_integration.py recall --grade <grade> --csv <path> # recall on any CSV
+    python app/tests/test_integration.py regression --grade <grade>          # exercise the 3 bug-prone shapes
+    python app/tests/test_integration.py all --grade <grade>                 # both
+
+`--grade` selects which of pilling / matting / fuzzing to test against;
+the script only exercises one grade per run since each has its own
+trained network.
 
 Each check prints PASS/FAIL; the process exits non-zero if anything fails.
 """
@@ -29,7 +33,12 @@ from itanet_recall import predict_from_csv, format_number, ITANetFileWriter
 
 
 GRADE_RANGE = (1.0, 5.0)
-DEFAULT_RECALL_CSV = REPO_ROOT / "output" / "grading_results" / "00000-100-1-analysis.csv"
+
+
+def _default_recall_csv(grade: str) -> Path:
+    """First grade-specific analysis CSV under output/grading_results/, if any."""
+    matches = sorted((REPO_ROOT / "output" / "grading_results").glob(f"*-{grade}-analysis.csv"))
+    return matches[0] if matches else REPO_ROOT / "output" / "grading_results" / f"missing-{grade}-analysis.csv"
 
 
 # --- helpers -----------------------------------------------------------------
@@ -61,15 +70,15 @@ def _read_predictions(csv_path: str) -> list[float]:
         return [float(r["Predicted_Grade"]) for r in reader]
 
 
-def _run_recall(csv_path: str, output_path: str) -> list[float]:
+def _run_recall(csv_path: str, output_path: str, grade: str) -> list[float]:
     predict_from_csv(
         csv_path=csv_path,
-        data_dir=cfg.get_itanet_run_dir("pilling"),
+        data_dir=cfg.get_itanet_run_dir(grade),
         dll_path=cfg.DLL_PATH,
         output_path=output_path,
         feature_cols=cfg.FEATURE_COLUMNS,
         clip_range=cfg.CLIP_RANGE,
-        fls_dir=cfg.get_itanet_fls_dir("pilling"),
+        fls_dir=cfg.get_itanet_fls_dir(grade),
     )
     return _read_predictions(output_path)
 
@@ -78,15 +87,15 @@ def _run_recall(csv_path: str, output_path: str) -> list[float]:
 
 
 def cmd_recall(args: argparse.Namespace, rep: Reporter) -> None:
-    print(f"\n== recall: {args.csv} ==")
-    csv_path = Path(args.csv)
+    csv_path = Path(args.csv) if args.csv else _default_recall_csv(args.grade)
+    print(f"\n== recall [{args.grade}]: {csv_path} ==")
     rep.check("input CSV exists", csv_path.exists(), str(csv_path))
     if not csv_path.exists():
         return
 
     out = args.output or str(REPO_ROOT / "_test_predictions.csv")
     try:
-        preds = _run_recall(str(csv_path), out)
+        preds = _run_recall(str(csv_path), out, args.grade)
     except Exception as e:
         rep.check("recall ran without error", False, repr(e))
         return
@@ -107,7 +116,7 @@ def cmd_recall(args: argparse.Namespace, rep: Reporter) -> None:
 
 
 def cmd_regression(args: argparse.Namespace, rep: Reporter) -> None:
-    print("\n== regression: bugs fixed in itanet_recall.py ==")
+    print(f"\n== regression [{args.grade}]: bugs fixed in itanet_recall.py ==")
 
     # --- bug 1: CSV with trailing Average/Grade/Backend summary rows -----
     # _load_recall_csv used to drop ALL rows here; the summary rows also
@@ -133,7 +142,7 @@ def cmd_regression(args: argparse.Namespace, rep: Reporter) -> None:
     # flow feeds a single-row temp CSV, not the persisted analysis CSV.
     out = str(REPO_ROOT / "_test_predictions_summary.csv")
     try:
-        preds = _run_recall(analysis_csv, out)
+        preds = _run_recall(analysis_csv, out, args.grade)
         rep.check(
             "summary-row CSV: 2 data + 1 Average -> 3 predictions",
             len(preds) == 3,
@@ -167,7 +176,7 @@ def cmd_regression(args: argparse.Namespace, rep: Reporter) -> None:
 
     out = str(REPO_ROOT / "_test_predictions_singlerow.csv")
     try:
-        preds = _run_recall(temp_csv, out)
+        preds = _run_recall(temp_csv, out, args.grade)
         rep.check(
             "single-row temp CSV: 1 data row -> 1 prediction",
             len(preds) == 1,
@@ -235,7 +244,7 @@ def cmd_regression(args: argparse.Namespace, rep: Reporter) -> None:
 # --- entry point -------------------------------------------------------------
 
 
-def _ensure_prereqs(rep: Reporter) -> bool:
+def _ensure_prereqs(rep: Reporter, grade: str) -> bool:
     ok = True
     if not Path(cfg.DLL_PATH).exists():
         rep.check("DLL present", False, cfg.DLL_PATH)
@@ -243,12 +252,16 @@ def _ensure_prereqs(rep: Reporter) -> bool:
     else:
         rep.check("DLL present", True, cfg.DLL_PATH)
 
-    net = Path(cfg.get_itanet_run_dir("pilling")) / "Neuronalesnetz.NET"
-    if not net.exists():
-        rep.check("trained .NET present", False, str(net))
+    # Prereq means recall-ready: not just present, but weights-bearing.
+    # A pristine .NET here would crash the DLL rather than give a graceful failure.
+    trained = grade in cfg.get_trained_grades()
+    net = Path(cfg.get_itanet_run_dir(grade)) / "Neuronalesnetz.NET"
+    if not trained:
+        detail = f"{net} (pristine or missing — train it first)"
+        rep.check(f"{grade} .NET is trained", False, detail)
         ok = False
     else:
-        rep.check("trained .NET present", True, str(net))
+        rep.check(f"{grade} .NET is trained", True, str(net))
     return ok
 
 
@@ -256,8 +269,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ITA-Net integration test CLI.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    def _add_grade(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--grade", required=True, choices=list(cfg.GRADES),
+                       help="Which grade's trained network to exercise.")
+
     p_recall = sub.add_parser("recall", help="Run recall on a CSV.")
-    p_recall.add_argument("--csv", default=str(DEFAULT_RECALL_CSV))
+    _add_grade(p_recall)
+    p_recall.add_argument("--csv", default=None,
+                          help="CSV to recall against (default: first *-{grade}-analysis.csv in output/grading_results/).")
     p_recall.add_argument("--output", default=None)
     p_recall.set_defaults(func=cmd_recall)
 
@@ -265,18 +284,20 @@ def main() -> None:
         "regression",
         help="Exercise the CSV shapes / formatter that triggered past bugs.",
     )
+    _add_grade(p_reg)
     p_reg.set_defaults(func=cmd_regression)
 
     p_all = sub.add_parser("all", help="Run recall + regression.")
-    p_all.set_defaults(func=None)
-    p_all.add_argument("--csv", default=str(DEFAULT_RECALL_CSV))
+    _add_grade(p_all)
+    p_all.add_argument("--csv", default=None)
     p_all.add_argument("--output", default=None)
+    p_all.set_defaults(func=None)
 
     args = parser.parse_args()
     rep = Reporter()
 
-    print("== prereqs ==")
-    if not _ensure_prereqs(rep):
+    print(f"== prereqs [{args.grade}] ==")
+    if not _ensure_prereqs(rep, args.grade):
         rep.summary_and_exit()
 
     if args.cmd == "all":

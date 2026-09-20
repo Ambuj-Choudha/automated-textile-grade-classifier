@@ -89,8 +89,10 @@ def _add_results_table(
     pdf: PillingReportPDF,
     results_by_rubs: Dict[int, List[str | float | int]],
     rub_levels: Sequence[int] = DEFAULT_RUB_LEVELS,
+    primary_grade_label: str = "Pilling",
     matting_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
     fuzzing_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
+    pilling_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
 ):
     left_w = 20
     res_w = 12
@@ -98,10 +100,15 @@ def _add_results_table(
     pdf.set_fill_color(220, 220, 220)
     pdf.set_font("Arial", "B", 8)
 
-    grade_sections = [("Pilling", results_by_rubs)]
-    if matting_by_rubs is not None:
+    # The primary column is whichever grade actually has data first (usually
+    # pilling). Only add each secondary column when it's genuinely present AND
+    # isn't already the primary — avoids rendering the same column twice.
+    grade_sections = [(primary_grade_label, results_by_rubs)]
+    if pilling_by_rubs is not None and primary_grade_label != "Pilling":
+        grade_sections.append(("Pilling", pilling_by_rubs))
+    if matting_by_rubs is not None and primary_grade_label != "Matting":
         grade_sections.append(("Matting", matting_by_rubs))
-    if fuzzing_by_rubs is not None:
+    if fuzzing_by_rubs is not None and primary_grade_label != "Fuzzing":
         grade_sections.append(("Fuzzing", fuzzing_by_rubs))
 
     n_sections = len(grade_sections)
@@ -180,8 +187,10 @@ def generate_pilling_report(
     load_weight_g: str | float | int,
     operator_name: str,
     results_by_rubs: Dict[int, List[str | float | int]] | None = None,
+    primary_grade_label: str = "Pilling",
     matting_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
     fuzzing_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
+    pilling_by_rubs: Optional[Dict[int, List[str | float | int]]] = None,
     abradant: str = "Similar Fabric",
     output_path: str,
     report_date: Optional[datetime] = None,
@@ -208,8 +217,10 @@ def generate_pilling_report(
         data = results_by_rubs or {}
         levels = list(rub_levels) if rub_levels else (sorted(data.keys()) if data else list(DEFAULT_RUB_LEVELS))
         _add_results_table(pdf, data, rub_levels=levels,
+                           primary_grade_label=primary_grade_label,
                            matting_by_rubs=matting_by_rubs,
-                           fuzzing_by_rubs=fuzzing_by_rubs)
+                           fuzzing_by_rubs=fuzzing_by_rubs,
+                           pilling_by_rubs=pilling_by_rubs)
 
         # Append ISO statement
         pdf.ln(6)

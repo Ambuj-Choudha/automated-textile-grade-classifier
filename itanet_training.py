@@ -11,8 +11,7 @@ Usage:
     python itanet_training.py data/training_features/pilling_averaged_features.csv --grade pilling
     python itanet_training.py data/training_features/matting_averaged_features.csv --grade matting --net-type 2
 
-Full workflow reference (DLL contract, byte formats, archive rationale, layout
-constraints): docs/itanet/WORKFLOW.md.
+DLL contract, byte formats, layout constraints: docs/INTEGRATION.md.
 """
 
 from __future__ import annotations
