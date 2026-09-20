@@ -343,7 +343,8 @@ def main():
         description="Run ITA-Net recall on a CSV of features. "
                     "Reads/writes under models/itanet/<grade>/ (run/ + data/).",
     )
-    parser.add_argument("csv_path", help="Input CSV (e.g. output/grading_results/*.csv).")
+    parser.add_argument("csv_path", help="Features CSV (e.g. data/recall_dataset.csv). "
+                                         "Columns: Image, Mean, Std, Max, Mode.")
     parser.add_argument("--grade", required=True,
                         choices=["pilling", "matting", "fuzzing"],
                         help="Which grade network to use (required — recall is per-grade).")
@@ -364,7 +365,7 @@ def main():
                         help="0=preserve order (default), 1=shuffle.")
     args = parser.parse_args()
 
-    predict_from_csv(
+    out_path = predict_from_csv(
         csv_path=args.csv_path,
         data_dir=_grade_run_dir(args.grade),
         dll_path=default_dll_path(),
@@ -376,6 +377,8 @@ def main():
         net_type=args.net_type,
         shuffle=args.shuffle,
     )
+    
+    print(f"Wrote predictions to {out_path}")
 
 
 if __name__ == "__main__":

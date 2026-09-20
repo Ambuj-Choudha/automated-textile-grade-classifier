@@ -90,17 +90,15 @@ The script checks every grade first. If a CSV file is missing, or the network is
 
 ## 6. Check the result
 
-Test a trained network without the app:
+Run the trained network on a CSV of features and see the predictions — no app, no camera:
 
 ```powershell
-python itanet_recall.py output\grading_results\<sample>-<stage>-<trial>-<grade>-analysis.csv --grade <grade>
+python itanet_recall.py data\<your-features>.csv --grade <grade>
 ```
 
-Or run the full test (needs a trained network for the chosen grade):
+The CSV needs the same columns as the training data: `Image, Mean, Std, Max, Mode`. Predictions are written next to the input as `<your-features>_predictions.csv`. A sample fixture ships at [`data/recall_dataset.csv`](data/recall_dataset.csv).
 
-```powershell
-python app\tests\test_integration.py all --grade pilling
-```
+You may see a stray `in load_pattern und filename=RecallData.nri` line on stdout — that's a leaked debug print from the DLL, not an error. If the `Wrote predictions to ...` line appears, the run succeeded.
 
 ## 7. Fix a bad training run
 
