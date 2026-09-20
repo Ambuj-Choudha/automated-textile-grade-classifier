@@ -315,11 +315,16 @@ def _install_dummy_histogram_analysis(monkeypatch, tmp_path: Path):
     ha = types.ModuleType("histogram_analysis")
     _train_called = {"called": False, "args": None}
 
+    # Mirrors the real function's per-grade filtering so wiring tests can
+    # verify that only requested grades appear in the returned dict.
+    _mock_all = {"pilling": 3.0, "matting": 2.5, "fuzzing": 3.5}
+
     def analyze_difference_images_and_predict_output(
         sample_number, stage_number, trial_number,
         selected_grades=None, output_dir=None,
     ):
-        return {"pilling": 3.0}
+        requested = list(selected_grades) if selected_grades is not None else list(_mock_all)
+        return {g: _mock_all[g] for g in requested if g in _mock_all} or None
 
     def analyze_difference_images(
         sample_number, stage_number, trial_number,
@@ -395,14 +400,55 @@ def test_run_grading_analysis_returns_grade_dict(prepared_env):
     app = _import_app_module()
     grades = app.run_grading_analysis("00001", "1", "1")
     assert isinstance(grades, dict)
-    assert "pilling" in grades
+    assert set(grades) == {"pilling", "matting", "fuzzing"}
     assert grades["pilling"] == pytest.approx(3.0)
 
 
 def test_run_grading_analysis_selected_grades_forwarded(prepared_env):
     app = _import_app_module()
     grades = app.run_grading_analysis("00001", "1", "1", selected_grades=["pilling"])
-    assert isinstance(grades, dict)
+    # Only the requested grade should come back — the two the operator didn't
+    # tick in the sidebar must not appear.
+    assert grades == {"pilling": pytest.approx(3.0)}
+
+
+def test_run_grading_analysis_multi_grade_subset(prepared_env):
+    app = _import_app_module()
+    grades = app.run_grading_analysis("00001", "1", "1", selected_grades=["matting", "fuzzing"])
+    assert set(grades) == {"matting", "fuzzing"}
+    assert grades["matting"] == pytest.approx(2.5)
+    assert grades["fuzzing"] == pytest.approx(3.5)
+
+
+def test_capture_pipeline_forwards_sidebar_selection_to_grading(prepared_env, tmp_path):
+    """End-to-end: sidebar checkbox -> session_state -> pipeline -> analysis call.
+
+    The sidebar writes KEY_SELECTED_GRADES; run_capture_pipeline reads it and
+    forwards to run_grading_analysis. This test pins that hop so a refactor
+    that severs it fails loudly instead of silently reverting to "all grades".
+    """
+    _import_app_module()  # sets up sys.modules with the dummies
+    st = prepared_env["st"]
+    from app import state as S
+    from app.pipeline import run_capture_pipeline
+
+    # The pipeline gate at stage != "0" requires a stage-0 reference image on
+    # disk; drop an empty placeholder since capture_sample_images is stubbed.
+    cfg = prepared_env["cfg"]
+    stage0_dir = Path(cfg.get_input_dir(cfg.SUFFIX_GRADING))
+    stage0_dir.mkdir(parents=True, exist_ok=True)
+    (stage0_dir / cfg.make_input_filename("00001", "0", "1", 1)).write_bytes(b"")
+
+    st.session_state[S.KEY_SELECTED_GRADES] = ["fuzzing"]
+    st.session_state[S.KEY_FS_EPOCH] = 0
+
+    ok = run_capture_pipeline(
+        mode="grading", sample_number="00001", stage_number="1", trial_number="1",
+        motor_ip="127.0.0.1", motor_port=18812,
+    )
+    assert ok is True
+    grade_result = st.session_state.get(S.KEY_GRADE)
+    assert grade_result == {"fuzzing": pytest.approx(3.5)}
 
 
 def test_training_path_calls_analyze_difference_images(prepared_env):

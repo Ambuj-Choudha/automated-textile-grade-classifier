@@ -206,8 +206,9 @@ class TestExportResultsPerGrade:
             assert f"{rub} rev." in text
 
     def test_matting_only_still_produces_pdf(self, grading_results_dir):
-        """If only matting has CSVs (unusual but possible), the report should
-        still list its rub levels."""
+        """If only matting has CSVs (e.g. pilling network isn't trained), the
+        report should promote matting to the primary column instead of showing
+        a full 'Pilling' column of NAs."""
         d = grading_results_dir["results"]
         _write_analysis_csv(d, "013", 100, 1, "matting", "2.5")
         _write_analysis_csv(d, "013", 200, 1, "matting", "3")
@@ -218,6 +219,39 @@ class TestExportResultsPerGrade:
         text = _read_pdf_text(str(pdf))
         assert "100 rev." in text
         assert "200 rev." in text
+        # Matting values must appear; Pilling column must not (there's no data).
+        assert "2.5" in text
+        assert "Matting" in text
+        assert "Pilling" not in text
+
+    def test_fuzzing_only_promotes_to_primary(self, grading_results_dir):
+        """Same as above but for fuzzing — checks that primary-grade fallback
+        walks cfg.GRADES in order and skips missing ones cleanly."""
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "015", 100, 1, "fuzzing", "4")
+
+        assert export_results("015", "100", "150", "Op") is True
+        pdf = grading_results_dir["reports"] / "015-Op-report.pdf"
+        assert pdf.exists()
+        text = _read_pdf_text(str(pdf))
+        assert "Fuzzing" in text
+        assert "Pilling" not in text
+        assert "Matting" not in text
+
+    def test_matting_and_fuzzing_without_pilling(self, grading_results_dir):
+        """Two grades present, pilling missing — matting should be primary,
+        fuzzing a secondary column, and no Pilling column anywhere."""
+        d = grading_results_dir["results"]
+        _write_analysis_csv(d, "016", 100, 1, "matting", "2.5")
+        _write_analysis_csv(d, "016", 100, 1, "fuzzing", "3.5")
+
+        assert export_results("016", "100", "150", "Op") is True
+        pdf = grading_results_dir["reports"] / "016-Op-report.pdf"
+        assert pdf.exists()
+        text = _read_pdf_text(str(pdf))
+        assert "Matting" in text
+        assert "Fuzzing" in text
+        assert "Pilling" not in text
 
     def test_operator_name_sanitized_in_filename(self, grading_results_dir):
         d = grading_results_dir["results"]
@@ -226,6 +260,31 @@ class TestExportResultsPerGrade:
         assert export_results("014", "100", "150", "Op Test!@#") is True
         # Non-alnum stripped except '-' and '_'
         assert (grading_results_dir["reports"] / "014-OpTest-report.pdf").exists()
+
+    def test_pilling_added_after_matting_becomes_primary(self, grading_results_dir):
+        """User workflow: matting graded first (report shows Matting primary),
+        then pilling network gets trained and pilling grades are captured. The
+        next export must re-detect pilling and promote it to primary — this
+        pins the "re-scan disk on every call" invariant so no cached state
+        keeps matting as primary."""
+        d = grading_results_dir["results"]
+
+        _write_analysis_csv(d, "017", 100, 1, "matting", "2.5")
+        assert export_results("017", "100", "150", "Op") is True
+        first_pdf = grading_results_dir["reports"] / "017-Op-report.pdf"
+        first_text = _read_pdf_text(str(first_pdf))
+        assert "Matting" in first_text
+        assert "Pilling" not in first_text
+
+        # Later: pilling CSV lands on disk (e.g. network was just trained).
+        _write_analysis_csv(d, "017", 100, 1, "pilling", "3.5")
+        assert export_results("017", "100", "150", "Op") is True
+        second_text = _read_pdf_text(str(first_pdf))
+        # Pilling now primary, matting demoted to secondary — both visible.
+        assert "Pilling" in second_text
+        assert "Matting" in second_text
+        assert "3.5" in second_text
+        assert "2.5" in second_text
 
 
 # --- generate_pilling_report direct unit tests ------------------------------
